@@ -17,7 +17,7 @@ export function renderYoutuberSelectScreen(onSelect: (youtuber: YoutuberProfile)
   if (!firstYoutuber) throw new Error("No youtubers registered");
   let selected: YoutuberProfile = firstYoutuber;
 
-  const preview = createCarPreview(showcaseCar(selected));
+  const preview = createCarPreview(showcaseCar(selected), avatarLook(selected));
 
   const bar = buildCarouselBar(
     YOUTUBERS.map((youtuber) => ({
@@ -28,7 +28,7 @@ export function renderYoutuberSelectScreen(onSelect: (youtuber: YoutuberProfile)
     (index) => {
       selected = YOUTUBERS[index] ?? selected;
       root.style.setProperty("--theme-color", selected.themeColor);
-      preview.setCar(showcaseCar(selected));
+      preview.setCar(showcaseCar(selected), avatarLook(selected));
     },
   );
 
@@ -68,6 +68,15 @@ export function renderYoutuberSelectScreen(onSelect: (youtuber: YoutuberProfile)
   );
 
   return root;
+}
+
+/** The Mii-style stand-in for the youtuber, shirt in their theme color. */
+function avatarLook(youtuber: YoutuberProfile) {
+  return {
+    shirtColor: youtuber.avatar.shirtColor ?? youtuber.themeColor,
+    skinTone: youtuber.avatar.skinTone,
+    hairColor: youtuber.avatar.hairColor,
+  };
 }
 
 function showcaseCar(youtuber: YoutuberProfile) {

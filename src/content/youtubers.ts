@@ -13,6 +13,7 @@ export const YOUTUBERS: readonly YoutuberProfile[] = [
     displayName: "SP Street Garage",
     channelHandle: "@spstreetgarage",
     themeColor: "#ff5a1f",
+    avatar: { skinTone: "#e8b98a", hairColor: "#14100c" },
     garage: { cars: CARS },
   },
 ];

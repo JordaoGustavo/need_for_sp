@@ -2,11 +2,19 @@ import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { CarDefinition } from "../../domain/car";
 import { buildCarMesh, disposeCarMesh } from "../../rendering/three/carMesh";
+import {
+  animateMiiWave,
+  buildMiiCharacter,
+  disposeMiiCharacter,
+  type MiiCharacter,
+  type MiiLook,
+} from "../../rendering/three/miiCharacter";
 import { playPlatformDock, playPlatformSlide } from "../../audio/mechSounds";
 
 export interface CarPreview {
   readonly element: HTMLElement;
-  setCar(car: CarDefinition): void;
+  /** Swaps the showcase to this car (and optional host character) via the platform animation. */
+  setCar(car: CarDefinition, host?: MiiLook | null): void;
   dispose(): void;
 }
 
@@ -20,6 +28,13 @@ interface PlatformRig {
   readonly car: THREE.Group;
   readonly turntable: THREE.Mesh;
   readonly definition: CarDefinition;
+  readonly host: MiiCharacter | null;
+  readonly hostLook: MiiLook | null;
+}
+
+interface PendingSwap {
+  readonly car: CarDefinition;
+  readonly host: MiiLook | null;
 }
 
 type SwapPhase =
@@ -28,12 +43,13 @@ type SwapPhase =
   | { kind: "settle"; elapsed: number };
 
 /**
- * NFSU2-style garage showcase. The car idles rotating on a lit platform;
- * swapping cars moves THE PLATFORMS, not the cars: the current base slides
- * off carrying its car, the new base slides in from the other side and locks
- * into place with a metal clank (see the NFSU2 car-select carousel).
+ * NFSU2-style garage showcase. The car idles rotating on a lit platform —
+ * optionally with the youtuber's Mii-style character standing beside it,
+ * waving. Swapping moves THE PLATFORMS, not the cars: the current base slides
+ * off carrying its car (and host), the new base slides in from the other side
+ * and locks into place with a metal clank (see the NFSU2 car-select carousel).
  */
-export function createCarPreview(initialCar: CarDefinition): CarPreview {
+export function createCarPreview(initialCar: CarDefinition, initialHost?: MiiLook | null): CarPreview {
   const element = document.createElement("div");
   element.className = "car-preview-3d";
 
@@ -61,13 +77,13 @@ export function createCarPreview(initialCar: CarDefinition): CarPreview {
   rimLight.position.set(-5, 4, -4);
   scene.add(rimLight);
 
-  let rig = buildPlatform(initialCar);
+  let rig = buildPlatform(initialCar, initialHost ?? null);
   scene.add(rig.group);
 
   let phase: SwapPhase = { kind: "idle" };
-  let pendingCar: CarDefinition | null = null;
+  let pending: PendingSwap | null = null;
 
-  function buildPlatform(car: CarDefinition): PlatformRig {
+  function buildPlatform(car: CarDefinition, hostLook: MiiLook | null): PlatformRig {
     const group = new THREE.Group();
     const turntable = new THREE.Mesh(
       new THREE.CylinderGeometry(3.2, 3.4, 0.12, 48),
@@ -76,19 +92,31 @@ export function createCarPreview(initialCar: CarDefinition): CarPreview {
     turntable.position.y = -0.06;
     const carMesh = buildCarMesh(car.visual);
     group.add(turntable, carMesh);
-    return { group, car: carMesh, turntable, definition: car };
+
+    let host: MiiCharacter | null = null;
+    if (hostLook) {
+      host = buildMiiCharacter(hostLook);
+      // Standing at the platform's edge beside the car — clear of the car's
+      // spin radius and framed to the side of it, never in front.
+      host.group.position.set(2.35, 0, 1.35);
+      host.group.rotation.y = Math.atan2(camera.position.x - 2.35, camera.position.z - 1.35);
+      group.add(host.group);
+    }
+
+    return { group, car: carMesh, turntable, definition: car, host, hostLook };
   }
 
   function disposePlatform(platform: PlatformRig): void {
     scene.remove(platform.group);
     disposeCarMesh(platform.car);
+    if (platform.host) disposeMiiCharacter(platform.host);
     platform.turntable.geometry.dispose();
     (platform.turntable.material as THREE.Material).dispose();
   }
 
-  function beginSwap(car: CarDefinition): void {
+  function beginSwap(swap: PendingSwap): void {
     const outgoing = rig;
-    rig = buildPlatform(car);
+    rig = buildPlatform(swap.car, swap.host);
     // Keep the showcase angle continuous: the new car arrives already posed.
     rig.car.rotation.y = outgoing.car.rotation.y;
     rig.group.position.x = -SLIDE_DISTANCE;
@@ -97,9 +125,14 @@ export function createCarPreview(initialCar: CarDefinition): CarPreview {
     playPlatformSlide(SWAP_SECONDS);
   }
 
-  function animatePhase(dt: number): void {
+  function sameShowcase(car: CarDefinition, host: MiiLook | null): boolean {
+    return car.id === rig.definition.id && looksEqual(host, rig.hostLook);
+  }
+
+  function animatePhase(dt: number, timeSeconds: number): void {
     // The car keeps its slow showcase spin even while the platform moves.
     rig.car.rotation.y += 0.007;
+    if (rig.host) animateMiiWave(rig.host, timeSeconds);
 
     switch (phase.kind) {
       case "idle":
@@ -128,9 +161,9 @@ export function createCarPreview(initialCar: CarDefinition): CarPreview {
         rig.group.position.y = -0.06 * Math.exp(-5 * t) * Math.cos(t * Math.PI * 5);
         if (t >= 1) {
           rig.group.position.y = 0;
-          if (pendingCar) {
-            const next = pendingCar;
-            pendingCar = null;
+          if (pending) {
+            const next = pending;
+            pending = null;
             beginSwap(next);
           } else {
             phase = { kind: "idle" };
@@ -149,7 +182,7 @@ export function createCarPreview(initialCar: CarDefinition): CarPreview {
     const dt = lastMs === null ? 0 : Math.min(0.05, (nowMs - lastMs) / 1000);
     lastMs = nowMs;
 
-    animatePhase(dt);
+    animatePhase(dt, nowMs / 1000);
 
     const width = element.clientWidth;
     const height = element.clientHeight;
@@ -168,13 +201,14 @@ export function createCarPreview(initialCar: CarDefinition): CarPreview {
 
   return {
     element,
-    setCar(car: CarDefinition): void {
+    setCar(car: CarDefinition, host?: MiiLook | null): void {
+      const nextHost = host ?? null;
       if (phase.kind === "idle") {
-        if (car.id !== rig.definition.id) beginSwap(car);
+        if (!sameShowcase(car, nextHost)) beginSwap({ car, host: nextHost });
         return;
       }
       // Swap already running: queue the latest request; it starts after docking.
-      pendingCar = car.id !== rig.definition.id ? car : null;
+      pending = sameShowcase(car, nextHost) ? null : { car, host: nextHost };
     },
     dispose(): void {
       disposed = true;
@@ -185,6 +219,12 @@ export function createCarPreview(initialCar: CarDefinition): CarPreview {
       element.remove();
     },
   };
+}
+
+function looksEqual(a: MiiLook | null, b: MiiLook | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.shirtColor === b.shirtColor && a.skinTone === b.skinTone && a.hairColor === b.hairColor;
 }
 
 function easeInOutQuad(t: number): number {
