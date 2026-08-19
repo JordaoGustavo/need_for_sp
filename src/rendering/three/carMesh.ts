@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import type { BodyStyle, CarVisual } from "../../domain/car";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { CAR_LENGTH_METERS, type BodyStyle, type CarVisual } from "../../domain/car";
 
 /**
  * Procedural tuner cars used by both the race renderer and the garage preview,
@@ -8,7 +9,9 @@ import type { BodyStyle, CarVisual } from "../../domain/car";
  * - "hatch": boxy hot hatch with a roof spoiler and grille accent (the Golf),
  * - "supra": long nose, cabin set back and the tall hoop wing (the Supra Mk4).
  * Bodies are beveled extrusions of a side profile (hood, beltline, wheel
- * arches); everything derives from CarVisual data (ADR 0005) — no 3D assets.
+ * arches); everything derives from CarVisual data (ADR 0005).
+ * Cars with CarVisual.model instead load a real GLB asset (public/models/,
+ * credits in CREDITS.md) — the procedural body remains the fallback.
  * The group's forward direction is -Z; dimensions are in meters.
  */
 
@@ -75,7 +78,117 @@ const BODY_SPECS: Record<BodyStyle, BodySpec> = {
   },
 };
 
+/**
+ * Real car models (CarVisual.model): GLB assets are loaded once per
+ * url+color combination, normalized to the physics footprint (nose at -Z,
+ * length = CAR_LENGTH_METERS, wheels on y=0) and repainted, then cloned per
+ * car instance. Clones share geometry/materials with the cached template, so
+ * disposeCarMesh must never destroy them (see userData.sharedAssets).
+ */
+const modelTemplates = new Map<string, THREE.Group>();
+const modelTemplatePromises = new Map<string, Promise<THREE.Group>>();
+const gltfLoader = new GLTFLoader();
+
+function modelTemplateKey(visual: CarVisual): string {
+  return `${visual.model!.url}|${visual.color}`;
+}
+
+function loadModelTemplate(visual: CarVisual): Promise<THREE.Group> {
+  const key = modelTemplateKey(visual);
+  const pending = modelTemplatePromises.get(key);
+  if (pending) return pending;
+
+  const model = visual.model!;
+  const promise = gltfLoader.loadAsync(model.url).then((gltf) => {
+    const scene = gltf.scene;
+    scene.rotation.y = model.yawRad ?? Math.PI;
+
+    for (const name of model.hideNodes ?? []) {
+      const node = scene.getObjectByName(name);
+      if (node) node.visible = false;
+    }
+
+    if (model.bodyMaterials?.length) {
+      const paint = new THREE.MeshPhysicalMaterial({
+        color: new THREE.Color(visual.color),
+        metalness: 0.75,
+        roughness: 0.3,
+        clearcoat: 1,
+        clearcoatRoughness: 0.15,
+      });
+      scene.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        child.material = Array.isArray(child.material)
+          ? materials.map((m) => (model.bodyMaterials!.includes(m.name) ? paint : m))
+          : model.bodyMaterials!.includes(materials[0]!.name)
+            ? paint
+            : child.material;
+      });
+    }
+
+    // Normalize to the game's footprint: after the yaw above the car runs
+    // along Z, so scale by Z-length, drop wheels to y=0 and center on origin.
+    const wrapper = new THREE.Group();
+    wrapper.add(scene);
+    const box = new THREE.Box3().setFromObject(wrapper);
+    const size = box.getSize(new THREE.Vector3());
+    const scale = CAR_LENGTH_METERS / Math.max(size.z, 0.001);
+    wrapper.scale.setScalar(scale);
+    box.setFromObject(wrapper);
+    const center = box.getCenter(new THREE.Vector3());
+    wrapper.position.set(-center.x, -box.min.y, -center.z);
+
+    const template = new THREE.Group();
+    template.add(wrapper);
+    template.traverse((child) => {
+      if (child instanceof THREE.Mesh) child.userData.sharedAssets = true;
+    });
+    modelTemplates.set(key, template);
+    return template;
+  });
+  modelTemplatePromises.set(key, promise);
+  return promise;
+}
+
+/** Warm the model cache so buildCarMesh can clone synchronously later. */
+export function preloadCarModels(visuals: readonly CarVisual[]): void {
+  for (const visual of visuals) {
+    if (visual.model) void loadModelTemplate(visual).catch(() => {});
+  }
+}
+
+function attachModelClone(group: THREE.Group, template: THREE.Group): void {
+  const clone = template.clone(true);
+  group.add(clone);
+  const envMap = group.userData.envMap as THREE.Texture | undefined;
+  if (envMap) applyCarEnvironmentMap(group, envMap);
+}
+
 export function buildCarMesh(visual: CarVisual): THREE.Group {
+  if (visual.model) {
+    const group = new THREE.Group();
+    addUnderglow(group, visual.color);
+    const cached = modelTemplates.get(modelTemplateKey(visual));
+    if (cached) {
+      attachModelClone(group, cached);
+    } else {
+      loadModelTemplate(visual)
+        .then((template) => {
+          if (!group.userData.disposed) attachModelClone(group, template);
+        })
+        .catch((error) => {
+          // Asset missing/corrupt: fall back to the procedural body.
+          console.warn(`car model failed (${visual.model!.url}), using procedural body`, error);
+          if (!group.userData.disposed) group.add(buildProceduralCarMesh(visual));
+        });
+    }
+    return group;
+  }
+  return buildProceduralCarMesh(visual);
+}
+
+function buildProceduralCarMesh(visual: CarVisual): THREE.Group {
   const spec = BODY_SPECS[visual.bodyStyle];
   const group = new THREE.Group();
   const color = new THREE.Color(visual.color);
@@ -128,11 +241,17 @@ export function buildCarMesh(visual: CarVisual): THREE.Group {
     group.add(stripe);
   }
 
-  // NFSU2-signature underglow: an additive glow plane hugging the asphalt.
+  addUnderglow(group, visual.color);
+
+  return group;
+}
+
+/** NFSU2-signature underglow: an additive glow plane hugging the asphalt. */
+function addUnderglow(group: THREE.Group, color: string): void {
   const glow = new THREE.Mesh(
     new THREE.PlaneGeometry(2.6, 5.2),
     new THREE.MeshBasicMaterial({
-      map: buildRadialGlowTexture(visual.color),
+      map: buildRadialGlowTexture(color),
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -141,8 +260,6 @@ export function buildCarMesh(visual: CarVisual): THREE.Group {
   glow.rotation.x = -Math.PI / 2;
   glow.position.y = 0.03;
   group.add(glow);
-
-  return group;
 }
 
 /** Beveled extrusion of a side profile; the body variant carves the wheel arches. */
@@ -316,6 +433,8 @@ function buildRadialGlowTexture(color: string): THREE.CanvasTexture {
  * pick up reflections without brightening the whole night scene.
  */
 export function applyCarEnvironmentMap(group: THREE.Group, envMap: THREE.Texture): void {
+  // Remembered so GLB models that finish loading later also pick it up.
+  group.userData.envMap = envMap;
   group.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     const materials = Array.isArray(child.material) ? child.material : [child.material];
@@ -329,10 +448,16 @@ export function applyCarEnvironmentMap(group: THREE.Group, envMap: THREE.Texture
   });
 }
 
-/** Frees geometries/materials of a mesh built by buildCarMesh. */
+/**
+ * Frees geometries/materials of a mesh built by buildCarMesh. Meshes cloned
+ * from the GLB template cache (userData.sharedAssets) are skipped — their
+ * geometry/materials belong to the cache and outlive any single car.
+ */
 export function disposeCarMesh(group: THREE.Group): void {
+  group.userData.disposed = true;
   group.traverse((child) => {
     if (child instanceof THREE.Mesh) {
+      if (child.userData.sharedAssets) return;
       child.geometry.dispose();
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       for (const material of materials) {

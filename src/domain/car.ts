@@ -48,6 +48,26 @@ export interface CarSoundProfile {
  */
 export type BodyStyle = "coupe" | "hatch" | "supra" | "wagon";
 
+/**
+ * Reference to a real 3D model asset (GLB under public/models/). Content data,
+ * like everything else in CarVisual: the renderer normalizes any model to the
+ * physics footprint (CAR_LENGTH_METERS) and repaints the named body materials
+ * with CarVisual.color, so swapping a car's model is a data change only.
+ */
+export interface CarModelRef {
+  /** Asset URL, e.g. "/models/r34.glb". */
+  readonly url: string;
+  /** Yaw applied so the nose points -Z (game forward). Most GLBs face +Z → π. */
+  readonly yawRad?: number;
+  /**
+   * Material names to repaint with CarVisual.color. Omit for models whose
+   * livery is baked into a texture (they keep their original paint).
+   */
+  readonly bodyMaterials?: readonly string[];
+  /** Node names to hide (e.g. brand logo meshes). */
+  readonly hideNodes?: readonly string[];
+}
+
 export interface CarVisual {
   /** Base color, used by the default renderer (hex string, e.g. "#e63946"). */
   readonly color: string;
@@ -56,6 +76,8 @@ export interface CarVisual {
   readonly bodyStyle: BodyStyle;
   /** Optional accent color (e.g. the GTI's red grille stripe). */
   readonly accentColor?: string;
+  /** Optional real 3D model; without it the procedural mesh builder is used. */
+  readonly model?: CarModelRef;
 }
 
 export interface CarDefinition {
