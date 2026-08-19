@@ -19,28 +19,71 @@ export interface CarStats {
   readonly turnRateRadPerSec: number;
 }
 
+/**
+ * Physical footprint used for collision (physics) — the renderer's meshes are
+ * built to these same proportions so what you see is what you hit.
+ */
+export const CAR_WIDTH_METERS = 1.8;
+export const CAR_LENGTH_METERS = 4.3;
+
+/**
+ * Content-data description of how a car's engine sounds (ADR 0005 / ADR 0010):
+ * the engine audio is synthesized in WebAudio from these parameters, so each
+ * car gets a distinct voice without shipping audio files.
+ */
+export interface CarSoundProfile {
+  /** Fundamental oscillator frequency at idle, in Hz. Lower = deeper engine. */
+  readonly baseFrequencyHz: number;
+  /** How far the second oscillator is detuned, in cents. More = rougher, angrier. */
+  readonly detuneCents: number;
+  /** Low-pass cutoff multiplier (× fundamental) at full RPM. Higher = brighter/raspier. */
+  readonly brightness: number;
+}
+
+/**
+ * Which real-world silhouette the procedural mesh builder uses:
+ * "coupe" = fastback coupe (Civic), "hatch" = boxy hot hatch (Golf),
+ * "supra" = long-nosed GT with the tall hoop wing (Supra Mk4).
+ */
+export type BodyStyle = "coupe" | "hatch" | "supra";
+
 export interface CarVisual {
   /** Base color, used by the default renderer (hex string, e.g. "#e63946"). */
   readonly color: string;
   /** Display name shown in menu and race HUD. */
   readonly displayName: string;
+  readonly bodyStyle: BodyStyle;
+  /** Optional accent color (e.g. the GTI's red grille stripe). */
+  readonly accentColor?: string;
 }
 
 export interface CarDefinition {
   readonly id: string;
   readonly stats: CarStats;
   readonly visual: CarVisual;
+  readonly sound: CarSoundProfile;
+  readonly engine: EngineProfile;
 }
 
-/** Redline used by HUD skins to render the tachometer. Not physically simulated in the MVP. */
+/**
+ * Per-car rev range (content data, researched from the real cars): drives the
+ * tachometer scale, the red zone, and how far the engine revs. Not a full
+ * engine simulation — the HUD derivation maps speed into [idleRpm, redlineRpm].
+ */
 export interface EngineProfile {
-  readonly maxRpm: number;
+  /** Resting engine speed. */
   readonly idleRpm: number;
+  /** Start of the red zone; also where the needle pegs at full throttle. */
+  readonly redlineRpm: number;
+  /** Top of the tachometer dial (usually a round number past the redline). */
+  readonly maxRpm: number;
 }
 
+/** Fallback profile (generic sporty four-cylinder). */
 export const DEFAULT_ENGINE_PROFILE: EngineProfile = {
+  idleRpm: 800,
+  redlineRpm: 6500,
   maxRpm: 8000,
-  idleRpm: 900,
 };
 
 /** Player input for a single simulation tick. */

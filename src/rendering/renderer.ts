@@ -15,6 +15,13 @@ export interface RaceRenderInput {
   readonly hudSkin: HudSkin;
   readonly countdownSecondsRemaining: number | null;
   readonly raceMessage: string | null;
+  /** Race clock in seconds (0 until the countdown ends). */
+  readonly raceTimeSeconds: number;
+  readonly finished: boolean;
+  /** true = local player won, false = lost, null = race not decided yet. */
+  readonly localWon: boolean | null;
+  /** Local player's finish time, once they crossed the line. */
+  readonly localFinishTimeSeconds: number | null;
 }
 
 /**

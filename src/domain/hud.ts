@@ -7,7 +7,10 @@
 export interface HudState {
   readonly speedKmh: number;
   readonly rpm: number;
+  /** Top of the tachometer dial. */
   readonly maxRpm: number;
+  /** Start of the red zone on the dial. */
+  readonly redlineRpm: number;
   readonly gear: number;
 }
 

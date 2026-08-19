@@ -1,6 +1,6 @@
 # Renderização 2D top-down (Canvas) para o MVP, não WebGL 3D
 
-**Status**: accepted
+**Status**: superseded by ADR 0009 (a corrida agora é 3D com Three.js, atrás da mesma interface RaceRenderer prevista aqui)
 
 O briefing pede uma estética inspirada em Need for Speed Underground 2 (que é 3D), mas o requisito funcional prioritário é multiplayer 2 jogadores via link, com menu de garagem/carro e pistas jogáveis rapidamente. Decidimos renderizar em Canvas 2D top-down (câmera de cima, sprites de carro) para o MVP, e não WebGL 3D real (ex.: Three.js) nem pseudo-3D estilo Mode 7.
 

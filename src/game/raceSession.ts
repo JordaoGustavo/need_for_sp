@@ -1,14 +1,26 @@
-import { DEFAULT_ENGINE_PROFILE, createInitialCarRuntimeState, type CarDefinition, type CarInput, type CarRuntimeState } from "../domain/car";
+import { NEUTRAL_INPUT, createInitialCarRuntimeState, type CarDefinition, type CarInput, type CarRuntimeState } from "../domain/car";
 import { deriveHudState } from "./hudDerivation";
 import type { HudState } from "../domain/hud";
 import { createRaceRules, type RaceRules } from "../domain/raceRules";
 import { createInitialRaceProgress, type RaceProgress, type TrackDefinition } from "../domain/track";
-import { stepCarPhysics } from "../physics/carPhysics";
+import { applyTrackBoundaryCollision, applyTrackLimits, resolveCarCollision, stepCarPhysics } from "../physics/carPhysics";
 import type { PeerConnection } from "../net/webrtcConnection";
 import { decodeRaceMessage, encodeRaceMessage, type RaceMessage } from "../net/raceProtocol";
 
 const COUNTDOWN_SECONDS = 3;
+/** How long the "GO!" flash stays on screen after the countdown hits zero. */
+const GO_DISPLAY_SECONDS = 1.5;
 const REMOTE_STATE_SEND_INTERVAL_SECONDS = 1 / 20;
+
+/** Below this speed, full throttle spins the tires: revs peg high, tires squeal. */
+export const LAUNCH_WHEELSPIN_MAX_KMH = 32;
+/** How fast the tach needle is allowed to move, in RPM per second. */
+const RPM_NEEDLE_RATE_PER_SEC = 9000;
+/**
+ * Ignition-cut rev limiter: hitting the redline kills spark and the revs drop
+ * this much before climbing again — the needle (and exhaust) bounce at ~10Hz.
+ */
+const LIMITER_CUT_DROP_RPM = 850;
 
 export interface RaceSessionConfig {
   readonly track: TrackDefinition;
@@ -16,18 +28,24 @@ export interface RaceSessionConfig {
   readonly localPlayerId: string;
   readonly remotePlayerId: string;
   readonly isHost: boolean;
-  readonly peer: PeerConnection;
+  /** null runs the race solo: no remote car, countdown starts immediately. */
+  readonly peer: PeerConnection | null;
   readonly now?: () => number;
 }
 
 export interface RaceSessionSnapshot {
   readonly localState: CarRuntimeState;
-  readonly remoteState: CarRuntimeState;
+  /** null in solo races — there is no other car to render. */
+  readonly remoteState: CarRuntimeState | null;
   readonly localHud: HudState;
   readonly countdownSecondsRemaining: number | null;
   readonly finished: boolean;
   readonly winnerId: string | null;
   readonly message: string | null;
+  readonly raceTimeSeconds: number;
+  readonly localFinishTimeSeconds: number | null;
+  /** true on the exact frames the rev limiter cut ignition (revving at redline). */
+  readonly limiterCutTriggered: boolean;
 }
 
 /**
@@ -56,20 +74,37 @@ export class RaceSession {
 
   private finished = false;
   private winnerId: string | null = null;
+  private displayedRpm: number;
 
   constructor(private readonly config: RaceSessionConfig) {
     this.rules = createRaceRules(config.track);
     this.now = config.now ?? (() => Date.now());
+    this.displayedRpm = config.localCar.engine.idleRpm;
 
-    this.localState = createInitialCarRuntimeState(config.localPlayerId);
-    this.remoteState = createInitialCarRuntimeState(config.remotePlayerId);
+    // Drag-style starting lanes: host on the left half, guest on the right, so
+    // the cars never begin the race overlapping (which matters now that
+    // car-vs-car collision is resolved every tick). Solo starts centered.
+    const laneOffsetMeters = config.peer ? config.track.widthMeters / 4 : 0;
+    this.localState = {
+      ...createInitialCarRuntimeState(config.localPlayerId),
+      lateralOffsetMeters: config.isHost ? -laneOffsetMeters : laneOffsetMeters,
+    };
+    this.remoteState = {
+      ...createInitialCarRuntimeState(config.remotePlayerId),
+      lateralOffsetMeters: config.isHost ? laneOffsetMeters : -laneOffsetMeters,
+    };
     this.localProgress = createInitialRaceProgress(config.localPlayerId);
     this.remoteProgress = createInitialRaceProgress(config.remotePlayerId);
 
-    config.peer.onMessage((data) => this.handleMessage(decodeRaceMessage(data)));
+    config.peer?.onMessage((data) => this.handleMessage(decodeRaceMessage(data)));
   }
 
   start(): void {
+    if (!this.config.peer) {
+      // Solo race: nobody to wait for — the countdown starts right away.
+      this.startAtEpochMs = this.now() + COUNTDOWN_SECONDS * 1000;
+      return;
+    }
     this.send({ type: "hello", carId: this.config.localCar.id });
     if (this.config.isHost) {
       this.maybeStartCountdownAsHost();
@@ -79,11 +114,17 @@ export class RaceSession {
   /** Advances local simulation by dtSeconds using the given input. Call once per frame. */
   update(dtSeconds: number, input: CarInput): RaceSessionSnapshot {
     const countdownRemaining = this.countdownSecondsRemaining();
-    const racing = countdownRemaining !== null && countdownRemaining <= 0;
+    const racing = this.startAtEpochMs !== null && this.now() >= this.startAtEpochMs;
 
     if (racing && !this.finished) {
       this.raceTimeSeconds += dtSeconds;
       this.localState = stepCarPhysics(this.localState, this.config.localCar.stats, input, dtSeconds);
+      // Car-vs-car first: its lateral push may exceed the road, so the wall clamp runs last.
+      if (this.config.peer) {
+        this.localState = resolveCarCollision(this.localState, this.interpolatedRemoteState());
+      }
+      this.localState = applyTrackBoundaryCollision(this.localState, this.config.track.widthMeters, dtSeconds);
+      this.localState = applyTrackLimits(this.localState, this.config.track.lengthMeters);
       this.localProgress = this.rules.updateProgress(
         this.localProgress,
         this.localState,
@@ -92,12 +133,15 @@ export class RaceSession {
       );
 
       if (this.config.isHost) {
-        this.remoteProgress = this.rules.updateProgress(
-          this.remoteProgress,
-          this.remoteState,
-          this.config.track,
-          this.raceTimeSeconds,
-        );
+        if (this.config.peer) {
+          this.remoteProgress = this.rules.updateProgress(
+            this.remoteProgress,
+            this.remoteState,
+            this.config.track,
+            this.raceTimeSeconds,
+          );
+        }
+        // Solo: the remote never finishes, so this resolves to the local player.
         this.maybeDeclareWinnerAsHost();
       }
 
@@ -106,16 +150,38 @@ export class RaceSession {
         this.timeSinceLastSendSeconds = 0;
         this.send({ type: "carState", state: this.localState, raceTimeSeconds: this.raceTimeSeconds });
       }
+    } else if (this.finished) {
+      // Past the line, race control takes over and threshold-brakes the car to
+      // a smooth stop inside the runoff — the player never hits the end wall
+      // (which remains only as a physical safety net). Engine winds down with it.
+      const stillRolling = this.localState.speedKmh > 0.5;
+      const raceControlStats = {
+        ...this.config.localCar.stats,
+        brakingKmhPerSec: this.config.localCar.stats.brakingKmhPerSec * 2.2,
+      };
+      this.localState = stepCarPhysics(
+        this.localState,
+        raceControlStats,
+        stillRolling ? { throttle: false, brake: true, steer: 0 } : NEUTRAL_INPUT,
+        dtSeconds,
+      );
+      this.localState = applyTrackBoundaryCollision(this.localState, this.config.track.widthMeters, dtSeconds);
+      this.localState = applyTrackLimits(this.localState, this.config.track.lengthMeters);
     }
 
-    return this.snapshot(countdownRemaining, racing);
+    return this.snapshot(countdownRemaining, racing, input, dtSeconds);
   }
 
-  private snapshot(countdownSecondsRemaining: number | null, racing: boolean): RaceSessionSnapshot {
-    const hud = deriveHudState(this.localState.speedKmh, this.config.localCar.stats, DEFAULT_ENGINE_PROFILE);
+  private snapshot(
+    countdownSecondsRemaining: number | null,
+    racing: boolean,
+    input: CarInput,
+    dtSeconds: number,
+  ): RaceSessionSnapshot {
+    const { hud, limiterCut } = this.deriveSmoothedHud(racing, input, dtSeconds);
 
     let message: string | null = null;
-    if (!this.remoteHelloReceived) {
+    if (this.config.peer && !this.remoteHelloReceived) {
       message = "Aguardando o outro jogador...";
     } else if (this.finished) {
       message =
@@ -126,13 +192,56 @@ export class RaceSession {
 
     return {
       localState: this.localState,
-      remoteState: this.interpolatedRemoteState(),
+      remoteState: this.config.peer ? this.interpolatedRemoteState() : null,
       localHud: hud,
       countdownSecondsRemaining,
       finished: this.finished,
       winnerId: this.winnerId,
       message,
+      raceTimeSeconds: this.raceTimeSeconds,
+      localFinishTimeSeconds: this.localProgress.finishTimeSeconds,
+      limiterCutTriggered: limiterCut,
     };
+  }
+
+  /**
+   * HUD RPM with launch revs and a rate-limited needle: holding throttle on the
+   * line (or wheelspinning off it) sends the revs into the limiter, and gear
+   * changes sweep the needle down at a bounded speed instead of teleporting it.
+   *
+   * Returns whether the ignition-cut limiter fired this frame, so the race
+   * screen can stutter the engine sound in sync with the bouncing needle.
+   */
+  private deriveSmoothedHud(
+    racing: boolean,
+    input: CarInput,
+    dtSeconds: number,
+  ): { hud: HudState; limiterCut: boolean } {
+    const engine = this.config.localCar.engine;
+    const base = deriveHudState(this.localState.speedKmh, this.config.localCar.stats, engine);
+
+    let targetRpm = base.rpm;
+    const launching =
+      input.throttle &&
+      !this.finished &&
+      (!racing || this.localState.speedKmh < LAUNCH_WHEELSPIN_MAX_KMH);
+    if (launching) {
+      // Free-revving drives the engine straight into the limiter.
+      targetRpm = engine.redlineRpm;
+    }
+
+    const maxStep = RPM_NEEDLE_RATE_PER_SEC * dtSeconds;
+    this.displayedRpm += Math.max(-maxStep, Math.min(maxStep, targetRpm - this.displayedRpm));
+
+    // Ignition cut: touching the redline under throttle kills spark, the revs
+    // drop, then climb back — the needle bounces off the red zone.
+    let limiterCut = false;
+    if (input.throttle && !this.finished && this.displayedRpm >= engine.redlineRpm - 1) {
+      this.displayedRpm = engine.redlineRpm - LIMITER_CUT_DROP_RPM;
+      limiterCut = true;
+    }
+
+    return { hud: { ...base, rpm: this.displayedRpm }, limiterCut };
   }
 
   private interpolatedRemoteState(): CarRuntimeState {
@@ -157,6 +266,8 @@ export class RaceSession {
   private countdownSecondsRemaining(): number | null {
     if (this.startAtEpochMs === null) return null;
     const remaining = (this.startAtEpochMs - this.now()) / 1000;
+    // Null once the "GO!" flash has run its course, so the HUD stops drawing it.
+    if (remaining <= -GO_DISPLAY_SECONDS) return null;
     return Math.max(0, remaining);
   }
 
@@ -212,7 +323,7 @@ export class RaceSession {
   }
 
   private send(message: RaceMessage): void {
-    this.config.peer.send(encodeRaceMessage(message));
+    this.config.peer?.send(encodeRaceMessage(message));
   }
 }
 
