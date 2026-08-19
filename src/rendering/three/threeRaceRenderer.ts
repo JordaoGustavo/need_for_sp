@@ -34,6 +34,32 @@ export class ThreeRaceRenderer implements RaceRenderer {
   private lastFrameMs: number | null = null;
   private carMeshes: { carId: string; mesh: THREE.Group }[] = [];
   private disposed = false;
+  // Mouse-orbit look-around: dragging adds a yaw/height offset to the chase
+  // camera (see updateChaseCamera); releasing eases it back to zero.
+  private orbitYaw = 0;
+  private orbitLift = 0;
+  private orbitDragging = false;
+  private lastPointerX = 0;
+  private lastPointerY = 0;
+  private readonly onPointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0) return;
+    this.orbitDragging = true;
+    this.lastPointerX = event.clientX;
+    this.lastPointerY = event.clientY;
+    this.container.setPointerCapture?.(event.pointerId);
+  };
+  private readonly onPointerMove = (event: PointerEvent): void => {
+    if (!this.orbitDragging) return;
+    const dx = event.clientX - this.lastPointerX;
+    const dy = event.clientY - this.lastPointerY;
+    this.lastPointerX = event.clientX;
+    this.lastPointerY = event.clientY;
+    this.orbitYaw -= dx * 0.007;
+    this.orbitLift = Math.max(-2, Math.min(6, this.orbitLift + dy * 0.02));
+  };
+  private readonly onPointerUp = (): void => {
+    this.orbitDragging = false;
+  };
 
   constructor(
     private readonly container: HTMLElement,
@@ -49,6 +75,13 @@ export class ThreeRaceRenderer implements RaceRenderer {
     const ctx = overlay.getContext("2d");
     if (!ctx) throw new Error("Canvas 2D context unavailable for HUD overlay");
     this.overlayCtx = ctx;
+
+    // Drag with the mouse to look around the car during the race.
+    container.style.touchAction = "none";
+    container.addEventListener("pointerdown", this.onPointerDown);
+    container.addEventListener("pointermove", this.onPointerMove);
+    container.addEventListener("pointerup", this.onPointerUp);
+    container.addEventListener("pointercancel", this.onPointerUp);
 
     this.scene.background = new THREE.Color(0x05070f);
     this.scene.fog = new THREE.Fog(0x05070f, 60, 320);
@@ -116,6 +149,10 @@ export class ThreeRaceRenderer implements RaceRenderer {
 
   dispose(): void {
     this.disposed = true;
+    this.container.removeEventListener("pointerdown", this.onPointerDown);
+    this.container.removeEventListener("pointermove", this.onPointerMove);
+    this.container.removeEventListener("pointerup", this.onPointerUp);
+    this.container.removeEventListener("pointercancel", this.onPointerUp);
     for (const entry of this.carMeshes) disposeCarMesh(entry.mesh);
     this.webgl.dispose();
     this.webgl.domElement.remove();
@@ -1011,16 +1048,35 @@ export class ThreeRaceRenderer implements RaceRenderer {
     const yaw = localCar.state.headingRad + pose.forwardAngleRad;
     const speedFraction = Math.min(1, Math.abs(localCar.state.speedKmh) / 260);
 
+    // Mouse-orbit offsets ease back to the chase position once released.
+    if (!this.orbitDragging) {
+      this.orbitYaw *= 0.9;
+      this.orbitLift *= 0.9;
+      if (Math.abs(this.orbitYaw) < 0.002) this.orbitYaw = 0;
+      if (Math.abs(this.orbitLift) < 0.01) this.orbitLift = 0;
+    }
+
     // Rigid follow, rotated with the car's world yaw so steering/reversing and
     // circuit corners keep the camera behind the car (forward = (sin, -cos)).
+    const orbitedYaw = yaw + this.orbitYaw;
     const sin = Math.sin(yaw);
     const cos = Math.cos(yaw);
+    const orbitSin = Math.sin(orbitedYaw);
+    const orbitCos = Math.cos(orbitedYaw);
     const back = 8.5 + speedFraction * 2;
     // Camera rides the road elevation (sampled slightly behind, so crests
     // and viaducts read naturally).
     const camY = this.pathModel!.pose(localCar.state.distanceMeters - back, 0).y;
-    this.camera.position.set(pose.x - sin * back, camY + 3.2 + speedFraction * 0.6, pose.z + cos * back);
-    this.camera.lookAt(pose.x + sin * 12, pose.y + 1.2, pose.z - cos * 12);
+    const camHeight = Math.max(camY + 1.1, camY + 3.2 + speedFraction * 0.6 + this.orbitLift);
+    this.camera.position.set(pose.x - orbitSin * back, camHeight, pose.z + orbitCos * back);
+
+    // While orbiting, look at the car itself; blended so the transition back
+    // to the road-ahead framing stays smooth.
+    const orbitAmount = Math.min(1, Math.abs(this.orbitYaw) / 0.4 + Math.abs(this.orbitLift) / 3);
+    const lookX = pose.x + sin * 12 * (1 - orbitAmount);
+    const lookY = pose.y + 1.2;
+    const lookZ = pose.z - cos * 12 * (1 - orbitAmount);
+    this.camera.lookAt(lookX, lookY, lookZ);
   }
 
   private drawOverlay(input: RaceRenderInput): void {
