@@ -30,6 +30,12 @@ export interface RaceSessionConfig {
   readonly isHost: boolean;
   /** null runs the race solo: no remote car, countdown starts immediately. */
   readonly peer: PeerConnection | null;
+  /**
+   * Track centerline curvature at a given distance, in rad/m (0 = straight).
+   * Fed into the physics so corners are NOT taken automatically — the driver
+   * has to steer through them. Omit for straight strips.
+   */
+  readonly trackCurvature?: (distanceMeters: number) => number;
   readonly now?: () => number;
 }
 
@@ -118,7 +124,13 @@ export class RaceSession {
 
     if (racing && !this.finished) {
       this.raceTimeSeconds += dtSeconds;
-      this.localState = stepCarPhysics(this.localState, this.config.localCar.stats, input, dtSeconds);
+      this.localState = stepCarPhysics(
+        this.localState,
+        this.config.localCar.stats,
+        input,
+        dtSeconds,
+        this.curvatureAt(this.localState.distanceMeters),
+      );
       // Car-vs-car first: its lateral push may exceed the road, so the wall clamp runs last.
       if (this.config.peer) {
         this.localState = resolveCarCollision(this.localState, this.interpolatedRemoteState());
@@ -166,6 +178,7 @@ export class RaceSession {
         raceControlStats,
         stillRolling ? { throttle: false, brake: true, steer: 0 } : NEUTRAL_INPUT,
         dtSeconds,
+        this.curvatureAt(this.localState.distanceMeters),
       );
       this.localState = applyTrackBoundaryCollision(this.localState, this.config.track.widthMeters, dtSeconds);
       if (this.config.track.raceType === "drag") {
@@ -265,6 +278,10 @@ export class RaceSession {
       speedKmh: lerp(previous.state.speedKmh, latest.state.speedKmh, factor),
       headingRad: lerp(previous.state.headingRad, latest.state.headingRad, factor),
     };
+  }
+
+  private curvatureAt(distanceMeters: number): number {
+    return this.config.trackCurvature?.(distanceMeters) ?? 0;
   }
 
   private countdownSecondsRemaining(): number | null {

@@ -194,7 +194,14 @@ export class ThreeRaceRenderer implements RaceRenderer {
       minZ = Math.min(minZ, s.z); maxZ = Math.max(maxZ, s.z);
     }
     const margin = 320;
-    const color = track.scenery === "serra" ? 0x08130a : track.scenery === "highway" ? 0x0b100c : 0x0a0d13;
+    const color =
+      track.scenery === "serra"
+        ? 0x08130a
+        : track.scenery === "highway"
+          ? 0x0b100c
+          : track.scenery === "autodromo"
+            ? 0x0b1707 // Interlagos grass
+            : 0x0a0d13;
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(maxX - minX + margin * 2, maxZ - minZ + margin * 2),
       new THREE.MeshStandardMaterial({ color, roughness: 1 }),
@@ -435,7 +442,130 @@ export class ThreeRaceRenderer implements RaceRenderer {
         // Mata Atlântica pressing against the road (SP-160 style).
         this.addTrees(track, samples, random, Math.round(track.lengthMeters / 7), 3.5, 46);
         return;
+      case "autodromo":
+        this.addAutodromo(track, samples, random);
+        return;
     }
+  }
+
+  /**
+   * Interlagos-style circuit dressing: red/white kerbs in the corners, grass
+   * verges, a white perimeter wall, grandstands + pit building on the main
+   * straight (Setor A / Pit Stop Club side) and floodlight towers.
+   */
+  private addAutodromo(
+    track: TrackDefinition,
+    samples: readonly TrackSample[],
+    random: () => number,
+  ): void {
+    const half = track.widthMeters / 2;
+
+    // Lighter mowed-grass verge hugging the asphalt.
+    const verge = new THREE.MeshStandardMaterial({ color: 0x14260c, roughness: 1 });
+    this.addRibbon(samples, -(half + 2.6), 5, verge, 0.005);
+    this.addRibbon(samples, half + 2.6, 5, verge, 0.005);
+
+    // Kerbs (zebras) wherever the track actually bends.
+    this.addKerbs(track, samples);
+
+    // Low white perimeter walls, like the concrete walls around Interlagos.
+    const wallMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd8dde2,
+      roughness: 0.8,
+      side: THREE.DoubleSide,
+    });
+    this.addWallRibbon(samples, -(half + 8), 0, 1, wallMaterial);
+    this.addWallRibbon(samples, half + 8, 0, 1, wallMaterial);
+
+    // Main straight: grandstands on the outside, pit building on the inside.
+    const standMaterial = new THREE.MeshStandardMaterial({ color: 0x39414d, roughness: 0.8 });
+    const seatsMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2b6cb0,
+      emissive: 0x1a4a80,
+      emissiveIntensity: 0.25,
+      roughness: 0.9,
+    });
+    for (let d = -80; d <= 100; d += 46) {
+      const anchor = this.anchorAt(d);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(10, 7, 40), standMaterial);
+      base.position.set(-(half + 16), 3.5, 0);
+      base.rotation.z = 0.32;
+      anchor.add(base);
+      const seats = new THREE.Mesh(new THREE.BoxGeometry(10.2, 1.2, 40.2), seatsMaterial);
+      seats.position.set(-(half + 16), 7.2, 0);
+      seats.rotation.z = 0.32;
+      anchor.add(seats);
+    }
+    const pitAnchor = this.anchorAt(20);
+    const pits = new THREE.Mesh(new THREE.BoxGeometry(9, 6, 120), standMaterial);
+    pits.position.set(half + 14, 3, 0);
+    pitAnchor.add(pits);
+    const pitGlass = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 2.2, 118),
+      new THREE.MeshStandardMaterial({ color: 0xbfd9ee, emissive: 0x9fc6ff, emissiveIntensity: 0.6 }),
+    );
+    pitGlass.position.set(half + 9.6, 3.4, 0);
+    pitAnchor.add(pitGlass);
+
+    // Floodlight towers around the lap.
+    const towerMaterial = new THREE.MeshStandardMaterial({ color: 0x1c212b, roughness: 0.6 });
+    const headMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xfff2cc,
+      emissiveIntensity: 3,
+    });
+    for (let d = 0; d < track.lengthMeters; d += Math.round(track.lengthMeters / 6)) {
+      const side = random() < 0.5 ? -1 : 1;
+      const pose = this.pathModel!.pose(d, side * (half + 10));
+      const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 16, 8), towerMaterial);
+      tower.position.set(pose.x, 8, pose.z);
+      this.scene.add(tower);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1, 0.5), headMaterial);
+      head.position.set(pose.x, 16.4, pose.z);
+      this.scene.add(head);
+      const glow = new THREE.PointLight(0xfff0cc, 70, 90, 1.7);
+      glow.position.set(pose.x, 15, pose.z);
+      this.scene.add(glow);
+    }
+
+    // The city of São Paulo pressing around the autodrome, further out.
+    this.addCityBuildings(track, samples, random, 18);
+  }
+
+  /** Red/white kerb ribbons along every bent section of the lap. */
+  private addKerbs(track: TrackDefinition, samples: readonly TrackSample[]): void {
+    const half = track.widthMeters / 2;
+    const material = new THREE.MeshBasicMaterial({ map: buildKerbTexture() });
+
+    let runStart: number | null = null;
+    const flushRun = (endIndex: number): void => {
+      if (runStart === null || endIndex - runStart < 2) {
+        runStart = null;
+        return;
+      }
+      const run = samples.slice(Math.max(0, runStart - 1), endIndex + 1);
+      this.addRibbon(run, -(half + 0.55), 1.2, material, 0.015, true);
+      this.addRibbon(run, half + 0.55, 1.2, material, 0.015, true);
+      runStart = null;
+    };
+
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = samples[i]!;
+      const b = samples[i + 1]!;
+      const angleA = Math.atan2(a.nz, a.nx);
+      const angleB = Math.atan2(b.nz, b.nx);
+      let delta = angleB - angleA;
+      if (delta > Math.PI) delta -= Math.PI * 2;
+      if (delta < -Math.PI) delta += Math.PI * 2;
+      const curvature = Math.abs(delta) / Math.max(1, b.d - a.d);
+
+      if (curvature > 0.01) {
+        if (runStart === null) runStart = i;
+      } else {
+        flushRun(i);
+      }
+    }
+    flushRun(samples.length - 1);
   }
 
   private addCityBuildings(
@@ -841,6 +971,23 @@ function buildTiledAsphaltTexture(): THREE.CanvasTexture {
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
+  return texture;
+}
+
+/** Red/white kerb bands; ribbon UVs are in 6m units → ~1.5m per band. */
+function buildKerbTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 8;
+  canvas.height = 32;
+  const ctx = canvas.getContext("2d")!;
+  for (let band = 0; band < 4; band++) {
+    ctx.fillStyle = band % 2 === 0 ? "#d21f2b" : "#f2f3f5";
+    ctx.fillRect(0, band * 8, 8, 8);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.magFilter = THREE.NearestFilter;
   return texture;
 }
 

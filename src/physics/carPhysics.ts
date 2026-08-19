@@ -28,12 +28,19 @@ const TRACK_START_BACKSTOP_METERS = -8;
  *   high speed for stability; in reverse the yaw inverts, like real steering.
  * - The heading persists until steered back — no auto-centering rails.
  * - Braking past a stop engages reverse, capped at walking pace.
+ *
+ * `pathCurvatureRadPerMeter` is the track centerline's curvature at the car's
+ * position. State lives in path coordinates (distance + lateral), where the
+ * road itself bends — subtracting the curvature's yaw keeps the car's WORLD
+ * heading constant unless the driver steers. The driver chooses the line
+ * through every corner; nobody gets pulled around a curve for free.
  */
 export function stepCarPhysics(
   state: CarRuntimeState,
   stats: CarStats,
   input: CarInput,
   dtSeconds: number,
+  pathCurvatureRadPerMeter = 0,
 ): CarRuntimeState {
   const nextSpeedKmh = computeNextSpeed(state.speedKmh, stats, input, dtSeconds);
 
@@ -42,11 +49,15 @@ export function stepCarPhysics(
   // No yaw when parked, full agility by ~30 km/h, progressively calmer beyond.
   const steerAuthority = Math.min(1, speedAbsMs / 8) / (1 + speedAbsMs / 45);
   const reverseFactor = nextSpeedKmh < 0 ? -1 : 1;
-  const headingRad =
+  const steeredHeadingRad =
     state.headingRad + input.steer * stats.turnRateRadPerSec * steerAuthority * reverseFactor * dtSeconds;
 
   const avgSpeedMs = ((state.speedKmh + nextSpeedKmh) / 2) * KMH_TO_MS;
-  const distanceMeters = state.distanceMeters + Math.cos(headingRad) * avgSpeedMs * dtSeconds;
+  const forwardDeltaMeters = Math.cos(steeredHeadingRad) * avgSpeedMs * dtSeconds;
+  // The road turned under the car; un-turn the relative heading by the same amount.
+  const headingRad = steeredHeadingRad - pathCurvatureRadPerMeter * forwardDeltaMeters;
+
+  const distanceMeters = state.distanceMeters + forwardDeltaMeters;
   const lateralOffsetMeters = state.lateralOffsetMeters + Math.sin(headingRad) * avgSpeedMs * dtSeconds;
 
   return {

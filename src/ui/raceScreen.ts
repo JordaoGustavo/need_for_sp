@@ -8,6 +8,7 @@ import { LAUNCH_WHEELSPIN_MAX_KMH } from "../game/raceSession";
 import { KeyboardInputController } from "../game/inputController";
 import { RaceSession } from "../game/raceSession";
 import { ThreeRaceRenderer } from "../rendering/three/threeRaceRenderer";
+import { createTrackPathModel } from "../rendering/three/trackPath";
 import { NfsuClusterHudSkin } from "../rendering/hudSkins/nfsuClusterHudSkin";
 import type { RenderedCar } from "../rendering/renderer";
 import type { PeerConnection } from "../net/webrtcConnection";
@@ -43,6 +44,15 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
   const hudSkin = new NfsuClusterHudSkin();
   const input = new KeyboardInputController();
 
+  // Curvature feed for the physics: sampled from the same path model the
+  // renderer uses, so "driving straight" in the world matches what you see.
+  const pathModel = createTrackPathModel(config.track);
+  const trackCurvature = (distanceMeters: number): number => {
+    const ahead = pathModel.pose(distanceMeters + 2, 0).forwardAngleRad;
+    const behind = pathModel.pose(distanceMeters - 2, 0).forwardAngleRad;
+    return normalizeAngleRad(ahead - behind) / 4;
+  };
+
   const session = new RaceSession({
     track: config.track,
     localCar: config.localCar,
@@ -50,6 +60,7 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
     remotePlayerId: config.remotePlayerId,
     isHost: config.isHost,
     peer: config.peer,
+    trackCurvature,
   });
 
   function resize(): void {
@@ -158,4 +169,11 @@ function computeSquealIntensity(
  */
 function resolveRemoteCarDefinition(session: RaceSession, fallback: CarDefinition): CarDefinition {
   return getCarById(session.getRemoteCarId() ?? "") ?? fallback;
+}
+
+function normalizeAngleRad(angle: number): number {
+  let a = angle % (Math.PI * 2);
+  if (a > Math.PI) a -= Math.PI * 2;
+  if (a < -Math.PI) a += Math.PI * 2;
+  return a;
 }

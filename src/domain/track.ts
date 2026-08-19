@@ -19,7 +19,7 @@ export interface TrackPathPoint {
 }
 
 /** Surroundings the renderer builds along the track. */
-export type TrackScenery = "city" | "highway" | "serra";
+export type TrackScenery = "city" | "highway" | "serra" | "autodromo";
 
 /** A tunnel section carved along the path (e.g. the Imigrantes serra tunnels). */
 export interface TrackTunnel {

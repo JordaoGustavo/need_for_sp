@@ -83,6 +83,16 @@ describe("stepCarPhysics", () => {
     expect(state.headingRad).toBeCloseTo(headingAfterSteer);
   });
 
+  it("does not corner for free: path curvature pushes an unsteered car off line", () => {
+    const moving = { ...createInitialCarRuntimeState("car-1"), speedKmh: 100 };
+    const straightOn = stepCarPhysics(moving, stats, { throttle: true, brake: false, steer: 0 }, 0.1);
+    const inCorner = stepCarPhysics(moving, stats, { throttle: true, brake: false, steer: 0 }, 0.1, 0.02);
+    // The road bent (rightwards curvature) under the car; relative to the
+    // road the car now points outward — the driver must steer to follow.
+    expect(straightOn.headingRad).toBe(0);
+    expect(inCorner.headingRad).toBeLessThan(0);
+  });
+
   it("cannot yaw while parked", () => {
     const parked = createInitialCarRuntimeState("car-1");
     const next = stepCarPhysics(parked, stats, { throttle: false, brake: false, steer: 1 }, 1);

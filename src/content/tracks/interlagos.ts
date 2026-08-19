@@ -23,8 +23,10 @@ export const INTERLAGOS: TrackDefinition = {
     { id: "descida-do-lago", distanceMeters: 900 },
     { id: "bico-de-pato", distanceMeters: 1350 },
   ],
-  widthMeters: 12,
-  scenery: "city",
+  // Real Interlagos runs 12-15m wide; grandstands, pit boxes, kerbs and grass
+  // verges come from the "autodromo" scenery.
+  widthMeters: 13,
+  scenery: "autodromo",
   path: [
     // Reta dos Boxes (start/finish), heading "west" along the top
     { x: 40, z: -18 },
