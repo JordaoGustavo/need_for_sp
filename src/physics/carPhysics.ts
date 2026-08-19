@@ -71,8 +71,12 @@ export function stepCarPhysics(
 
 /** Kerb width beyond the asphalt that can be used penalty-free, in meters. */
 const KERB_FREE_METERS = 1.5;
-/** Speed scrubbed while running on the grass run-off, in km/h per second. */
-const GRASS_DRAG_KMH_PER_SEC = 42;
+/**
+ * Grass drag is PROPORTIONAL to speed (rolling resistance), per second: it
+ * scrubs hard when you fly off at 200 km/h (~90 km/h/s) but never overpowers
+ * the engine at crawling pace — you can always drive/reverse off the grass.
+ */
+const GRASS_DRAG_RATE_PER_SEC = 0.45;
 
 /**
  * Collides the car with the track's side limits. With `runoffExtraMeters` the
@@ -101,7 +105,7 @@ export function applyTrackBoundaryCollision(
 
   // On the grass (past the free kerb strip): the run-off punishes, gently.
   if (runoffExtraMeters > 0 && absLateral > asphaltHalf - CAR_WIDTH_METERS / 2 + KERB_FREE_METERS) {
-    const dragged = Math.max(0, Math.abs(state.speedKmh) - GRASS_DRAG_KMH_PER_SEC * dtSeconds);
+    const dragged = Math.abs(state.speedKmh) * Math.max(0, 1 - GRASS_DRAG_RATE_PER_SEC * dtSeconds);
     return { ...state, speedKmh: Math.sign(state.speedKmh) * dragged };
   }
 
@@ -199,8 +203,9 @@ function computeNextSpeed(
     if (speed > 0) {
       speed = Math.max(0, speed - stats.brakingKmhPerSec * dtSeconds);
     } else {
-      // Already stopped (or reversing): back up at half the launch grunt.
-      speed -= stats.accelerationKmhPerSec * 0.5 * dtSeconds;
+      // Already stopped (or reversing): back up with real grunt — enough to
+      // pull the car out of grass and away from walls.
+      speed -= stats.accelerationKmhPerSec * 0.8 * dtSeconds;
     }
   } else {
     const speedFraction = clamp(Math.abs(speed) / stats.topSpeedKmh, 0, 1);

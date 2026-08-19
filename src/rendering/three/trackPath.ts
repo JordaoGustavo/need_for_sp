@@ -69,10 +69,30 @@ function createStraightModel(): TrackPathModel {
 function createCurveModel(track: TrackDefinition, closed: boolean): TrackPathModel {
   const rawPoints = track.path!.map((p) => new THREE.Vector3(p.x, 0, p.z));
   const rawCurve = new THREE.CatmullRomCurve3(rawPoints, closed, "centripetal");
+
+  // Densify and relax the polyline: sparse hand-placed control points pinch
+  // at corners (radius smaller than the road+run-off reach folds the
+  // ribbons). Resampling every ~10m and running a few moving-average passes
+  // rounds every corner to a drivable radius while keeping the layout.
+  const sampleCount = Math.max(48, Math.ceil(rawCurve.getLength() / 10));
+  let relaxed: THREE.Vector3[] = [];
+  for (let i = 0; i < sampleCount; i++) {
+    relaxed.push(rawCurve.getPointAt(i / (closed ? sampleCount : sampleCount - 1)));
+  }
+  for (let pass = 0; pass < 4; pass++) {
+    relaxed = relaxed.map((p, i) => {
+      if (!closed && (i === 0 || i === relaxed.length - 1)) return p;
+      const prev = relaxed[(i - 1 + relaxed.length) % relaxed.length]!;
+      const next = relaxed[(i + 1) % relaxed.length]!;
+      return new THREE.Vector3((prev.x + 2 * p.x + next.x) / 4, 0, (prev.z + 2 * p.z + next.z) / 4);
+    });
+  }
+
   // Rescale so the arc length matches the declared track length — progress,
   // checkpoints and world geometry then agree exactly.
-  const scale = track.lengthMeters / rawCurve.getLength();
-  const points = rawPoints.map((p) => p.multiplyScalar(scale));
+  const relaxedCurve = new THREE.CatmullRomCurve3(relaxed, closed, "centripetal");
+  const scale = track.lengthMeters / relaxedCurve.getLength();
+  const points = relaxed.map((p) => p.multiplyScalar(scale));
   const curve = new THREE.CatmullRomCurve3(points, closed, "centripetal");
   const length = track.lengthMeters;
 

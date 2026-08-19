@@ -46,23 +46,29 @@ export const INTERLAGOS: TrackDefinition = {
     { x: 160, z: 165 },
     { x: 146, z: 120 },
     // Up to Ferradura (right horseshoe at the top of the infield)
-    { x: 178, z: 85 },
-    { x: 205, z: 45 },
-    { x: 182, z: 8 },
-    // Laranjinha (tight right) and down to Pinheirinho (left)
-    { x: 150, z: 40 },
-    { x: 113, z: 75 },
-    { x: 76, z: 95 },
-    // Bico de Pato (right hairpin) and Mergulho
-    { x: 95, z: 133 },
-    { x: 60, z: 150 },
-    { x: 44, z: 116 },
-    // Junção (right) into the long climbing Subida dos Boxes
-    { x: 20, z: 148 },
-    { x: -12, z: 128 },
-    { x: 12, z: 103 },
-    { x: 80, z: 58 },
-    // Arquibancadas: left onto the pit straight, closing the lap
-    { x: 138, z: 18 },
+    { x: 180, z: 85 },
+    { x: 210, z: 42 },
+    { x: 184, z: 4 },
+    // Laranjinha (right) and down to Pinheirinho (left) — opened up so the
+    // road+run-off ribbons never fold over themselves (min radius ≥ ~25 raw)
+    { x: 148, z: 38 },
+    { x: 110, z: 74 },
+    { x: 74, z: 96 },
+    // Bico de Pato (wide right) and Mergulho
+    { x: 88, z: 132 },
+    { x: 58, z: 156 },
+    { x: 34, z: 124 },
+    // Junção (left-right) into the long climbing Subida dos Boxes
+    { x: 6, z: 140 },
+    { x: -20, z: 114 },
+    { x: 4, z: 88 },
+    // Subida dos Boxes: long climb east below the pit straight, then the wide
+    // Café do Sol / Arquibancadas left sweep onto the straight (spread across
+    // several points so the carousel stays wide — no hairpin pinch).
+    { x: 60, z: 62 },
+    { x: 120, z: 40 },
+    { x: 148, z: 22 },
+    { x: 160, z: -2 },
+    { x: 146, z: -16 },
   ],
 };
