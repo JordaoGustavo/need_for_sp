@@ -783,32 +783,127 @@ export class ThreeRaceRenderer implements RaceRenderer {
   }
 
   /** Tunnel sections: rock mound outside, concrete walls + lit ceiling inside. */
+  /**
+   * Tunnels bore through REAL mountains: a chain of big forested morros rises
+   * from the ground and swallows the road, concrete portal faces sit on the
+   * hillsides at both mouths, and inside the bore is an arched tube washed by
+   * warm sodium light strips — the SP-160 look.
+   */
   private addTunnels(track: TrackDefinition): void {
     for (const tunnel of track.tunnels ?? []) {
       const samples = this.pathModel!.sample(6, tunnel.startMeters, tunnel.endMeters);
-      const half = track.widthMeters / 2;
+      this.addTunnelArch(track, samples);
+      this.addTunnelMountain(track, tunnel.startMeters, tunnel.endMeters);
+      this.addTunnelPortal(track, tunnel.startMeters);
+      this.addTunnelPortal(track, tunnel.endMeters);
+    }
+  }
 
-      const concrete = new THREE.MeshStandardMaterial({
-        color: 0x2a2d33,
-        roughness: 0.9,
-        side: THREE.DoubleSide,
-      });
-      this.addWallRibbon(samples, -(half + 0.4), 0, 5, concrete);
-      this.addWallRibbon(samples, half + 0.4, 0, 5, concrete);
-      this.addRibbon(samples, 0, track.widthMeters + 1.4, concrete, 5);
-      // Continuous ceiling light strip, like the sodium lamps of the SP-160 tunnels.
-      this.addRibbon(samples, 0, 0.55, new THREE.MeshBasicMaterial({ color: 0xffe2a8 }), 4.85);
+  /** Arched interior tube (semi-elliptical rings connected along the path). */
+  private addTunnelArch(track: TrackDefinition, samples: readonly TrackSample[]): void {
+    const radius = track.widthMeters / 2 + 1.0;
+    const archHeight = radius * 0.62;
+    const ringSegments = 10;
 
-      // The mountain the tunnel cuts through: chunky dark mounds over the roof.
-      const rock = new THREE.MeshStandardMaterial({ color: 0x101b10, roughness: 1 });
-      for (let i = 0; i < samples.length; i += 3) {
-        const s = samples[i]!;
-        const mound = new THREE.Mesh(new THREE.BoxGeometry(track.widthMeters + 14, 9, 22), rock);
-        mound.position.set(s.x, s.y + 5.5, s.z);
-        mound.rotation.y = -Math.atan2(s.nx, s.nz) + Math.PI / 2;
-        this.scene.add(mound);
+    const positions: number[] = [];
+    for (const s of samples) {
+      for (let k = 0; k <= ringSegments; k++) {
+        const theta = Math.PI - (k / ringSegments) * Math.PI; // left base → right base
+        const lateral = Math.cos(theta) * radius;
+        positions.push(
+          s.x + s.nx * lateral,
+          s.y + Math.sin(theta) * archHeight + 0.02,
+          s.z + s.nz * lateral,
+        );
       }
     }
+    const indices: number[] = [];
+    const ringSize = ringSegments + 1;
+    for (let i = 0; i < samples.length - 1; i++) {
+      for (let k = 0; k < ringSegments; k++) {
+        const a = i * ringSize + k;
+        indices.push(a, a + 1, a + ringSize, a + 1, a + ringSize + 1, a + ringSize);
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+
+    // Warm self-lit concrete, like sodium lamps washing the vault.
+    const vault = new THREE.MeshStandardMaterial({
+      color: 0x4a3d2c,
+      emissive: 0x8a5a20,
+      emissiveIntensity: this.timeOfDay === "day" ? 0.28 : 0.4,
+      roughness: 0.9,
+      side: THREE.DoubleSide,
+    });
+    this.scene.add(new THREE.Mesh(geometry, vault));
+
+    // Continuous light strips low on both walls (the wall-washer look).
+    const stripMaterial = new THREE.MeshBasicMaterial({ color: 0xffc46b, side: THREE.DoubleSide });
+    this.addWallRibbon(samples, -(track.widthMeters / 2 + 0.75), 2.1, 2.45, stripMaterial);
+    this.addWallRibbon(samples, track.widthMeters / 2 + 0.75, 2.1, 2.45, stripMaterial);
+  }
+
+  /** The morro the tunnel cuts through: overlapping forested cones from the ground up. */
+  private addTunnelMountain(track: TrackDefinition, startMeters: number, endMeters: number): void {
+    const random = seededRandom(`${track.id}-tunnel-${startMeters}`);
+    const day = this.timeOfDay === "day";
+    const materials = [0x1d4419, 0x173a14].map(
+      (color) =>
+        new THREE.MeshStandardMaterial({
+          color: day ? color : (color & 0xfefefe) >> 1,
+          roughness: 1,
+        }),
+    );
+    // Cones start well inside the mouths so the road pierces the hillside
+    // surface where the arch already hides it, never in open air.
+    for (let d = startMeters + 16; d <= endMeters - 16; d += 26) {
+      const pose = this.pathModel!.pose(d, 0);
+      const radius = 42 + random() * 22;
+      const height = pose.y + 24 + random() * 10;
+      const morro = new THREE.Mesh(
+        new THREE.ConeGeometry(radius, height, 9),
+        materials[Math.floor(random() * materials.length)]!,
+      );
+      morro.position.set(pose.x, height / 2 - 2, pose.z);
+      morro.rotation.y = random() * Math.PI;
+      this.scene.add(morro);
+    }
+  }
+
+  /** Concrete portal face framing the tunnel mouth on the hillside. */
+  private addTunnelPortal(track: TrackDefinition, distanceMeters: number): void {
+    const anchor = this.anchorAt(distanceMeters);
+    const openingHalf = track.widthMeters / 2 + 1.1;
+    const openingHeight = 5.4;
+    const faceHeight = 9;
+    const wingWidth = 5;
+
+    const concrete = new THREE.MeshStandardMaterial({ color: 0x8d9297, roughness: 0.9 });
+    for (const side of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(wingWidth, faceHeight, 0.9), concrete);
+      wing.position.set(side * (openingHalf + wingWidth / 2), faceHeight / 2, 0);
+      anchor.add(wing);
+    }
+    const lintel = new THREE.Mesh(
+      new THREE.BoxGeometry(openingHalf * 2 + wingWidth * 2, faceHeight - openingHeight, 0.9),
+      concrete,
+    );
+    lintel.position.set(0, openingHeight + (faceHeight - openingHeight) / 2, 0);
+    anchor.add(lintel);
+
+    // Green trim ring around the mouth, like the Imigrantes portals.
+    const trim = new THREE.MeshStandardMaterial({ color: 0x2f7d4f, roughness: 0.7 });
+    for (const side of [-1, 1]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, openingHeight, 1), trim);
+      post.position.set(side * openingHalf, openingHeight / 2, 0);
+      anchor.add(post);
+    }
+    const top = new THREE.Mesh(new THREE.BoxGeometry(openingHalf * 2 + 0.5, 0.5, 1), trim);
+    top.position.set(0, openingHeight + 0.25, 0);
+    anchor.add(top);
   }
 
   // --- per-frame updates ----------------------------------------------------
