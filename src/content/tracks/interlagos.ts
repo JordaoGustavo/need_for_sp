@@ -1,7 +1,7 @@
 import type { TrackDefinition } from "../../domain/track";
 
 /**
- * Interlagita — circuito fechado com o desenho do Autódromo de Interlagos
+ * Interlagos — circuito fechado com o desenho do Autódromo de Interlagos
  * (traçado público), anti-horário como o real: Reta dos Boxes, S do Senna,
  * Curva do Sol, Reta Oposta, Descida do Lago, Ferradura, Laranjinha,
  * Pinheirinho, Bico de Pato, Mergulho, Junção e a Subida dos Boxes fechando
@@ -11,9 +11,9 @@ import type { TrackDefinition } from "../../domain/track";
  * pit straight on top, infield below); the renderer rescales the loop so one
  * lap equals lengthMeters.
  */
-export const INTERLAGITA: TrackDefinition = {
-  id: "interlagita",
-  displayName: "Interlagita",
+export const INTERLAGOS: TrackDefinition = {
+  id: "interlagos",
+  displayName: "Interlagos",
   description: "O desenho de Interlagos: S do Senna à Junção — 2 voltas decidem.",
   raceType: "circuit",
   lengthMeters: 1800,
