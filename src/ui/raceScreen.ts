@@ -10,7 +10,8 @@ import { KeyboardInputController } from "../game/inputController";
 import { RaceSession } from "../game/raceSession";
 import { ThreeRaceRenderer } from "../rendering/three/threeRaceRenderer";
 import { createTrackPathModel } from "../rendering/three/trackPath";
-import { NfsuClusterHudSkin } from "../rendering/hudSkins/nfsuClusterHudSkin";
+import { createHudSkin } from "../rendering/hudSkins/hudSkinRegistry";
+import { loadHudSkinId } from "../game/hudSkinPreference";
 import type { RenderedCar, TimeOfDay } from "../rendering/renderer";
 import type { PeerConnection } from "../net/webrtcConnection";
 
@@ -45,7 +46,7 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
   exitButton.textContent = "Voltar ao menu";
   exitButton.addEventListener("click", config.onExit);
   root.appendChild(exitButton);
-  const hudSkin = new NfsuClusterHudSkin();
+  const hudSkin = createHudSkin(loadHudSkinId());
   const input = new KeyboardInputController();
 
   // Curvature feed for the physics: sampled from the same path model the

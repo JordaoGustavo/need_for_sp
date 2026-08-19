@@ -4,6 +4,7 @@ import type { YoutuberProfile } from "../domain/youtuber";
 import { BANDEIRANTITA, getTrackById } from "../content/tracks";
 import { renderYoutuberSelectScreen } from "./menu/youtuberSelectScreen";
 import { renderCarSelectScreen, type RaceMode } from "./menu/carSelectScreen";
+import { renderGaugeSelectScreen } from "./menu/gaugeSelectScreen";
 import { renderTrackSelectScreen } from "./menu/trackSelectScreen";
 import { renderRoomScreen, type RoomScreenResult } from "./roomScreen";
 import { renderRaceScreen } from "./raceScreen";
@@ -31,6 +32,8 @@ export function startApp(container: HTMLElement): void {
         (car, mode) => onCarSelected(youtuber, car, mode),
         () => showScreen(container, renderYoutuberSelectScreen(onYoutuberSelected)),
         isGuestJoin,
+        // Gauge shop saves to localStorage and simply returns to car select.
+        () => showScreen(container, renderGaugeSelectScreen(() => onYoutuberSelected(youtuber))),
       ),
     );
   }

@@ -7,4 +7,4 @@ O usuário pediu explicitamente para já preparar a troca futura do "hub" (HUD) 
 ## Consequences
 
 - Trocar o HUD no futuro é implementar uma nova classe `HudSkin` e trocar qual instância a tela de corrida usa — sem tocar em física de carro ou rede.
-- Não há UI de seleção de HUD skin no MVP (fora de escopo agora), só a interface e uma implementação padrão.
+- ~~Não há UI de seleção de HUD skin no MVP (fora de escopo agora), só a interface e uma implementação padrão.~~ Atualização: a tela "Indicadores Personalizados" (acessível pela pill Velocímetro na seleção de carro) permite escolher entre as skins registradas em `hudSkinRegistry`; a escolha persiste em localStorage (`hudSkinPreference`).

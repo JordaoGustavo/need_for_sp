@@ -19,6 +19,7 @@ export function renderCarSelectScreen(
   onSelect: (car: CarDefinition, mode: RaceMode) => void,
   onBack: () => void,
   isGuestJoin: boolean,
+  onCustomizeGauges: () => void,
 ): HTMLElement {
   const root = document.createElement("div");
   root.className = "screen ccs";
@@ -92,14 +93,23 @@ export function renderCarSelectScreen(
     playBack();
     onBack();
   };
+  const customizeGauges = (): void => {
+    playSelect();
+    onCustomizeGauges();
+  };
   // Enter confirms the primary action: joining the invited room as guest, or solo.
   const primaryConfirm = isGuestJoin ? confirm("multiplayer") : confirm("solo");
   if (isGuestJoin) {
-    pills.append(buildPillButton("Voltar", back), buildPillButton("Continuar", confirm("multiplayer")));
+    pills.append(
+      buildPillButton("Velocímetro", customizeGauges),
+      buildPillButton("Voltar", back),
+      buildPillButton("Continuar", confirm("multiplayer")),
+    );
   } else {
     pills.append(
       buildPillButton("Corrida Solo", confirm("solo")),
       buildPillButton("Multiplayer", confirm("multiplayer")),
+      buildPillButton("Velocímetro", customizeGauges),
       buildPillButton("Voltar", back),
     );
   }

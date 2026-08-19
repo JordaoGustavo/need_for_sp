@@ -686,3 +686,44 @@ body {
 .race-exit-button.hidden {
   display: none;
 }
+
+/* --- Gauge select ("Indicadores Personalizados") ----------------------------- */
+
+.gauge-select {
+  align-items: center;
+}
+
+.gauge-select .nfsu-header {
+  align-self: stretch;
+}
+
+.gauge-preview-panel {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  margin: auto 0;
+  padding: 18px 26px;
+  background: linear-gradient(180deg, rgba(190, 198, 212, 0.3), rgba(120, 128, 142, 0.2));
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.5);
+  z-index: 1;
+}
+
+.gauge-preview-canvas {
+  width: min(760px, 62vw);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+}
+
+.gauge-preview-caption {
+  margin-bottom: 48px;
+  font-size: 1.6rem;
+  font-weight: 700;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--text);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+  z-index: 1;
+}
