@@ -732,11 +732,11 @@ export class ThreeRaceRenderer implements RaceRenderer {
 
       const height = 30 + random() * 55;
       const morro = new THREE.Mesh(
-        new THREE.ConeGeometry(radius, height, 9),
+        buildHillGeometry(radius, height, random),
         materials[Math.floor(random() * materials.length)]!,
       );
-      morro.position.set(x, height / 2 - 4, z);
-      morro.rotation.y = random() * Math.PI;
+      morro.position.set(x, -2, z);
+      morro.rotation.y = random() * Math.PI * 2;
       this.scene.add(morro);
     }
   }
@@ -884,6 +884,16 @@ export class ThreeRaceRenderer implements RaceRenderer {
     }
   }
 
+  /** Rounded hillside height (cosine dome) at a lateral offset from the bore. */
+  private ridgeHeightAt(lateral: number, roadY: number, distanceMeters: number): number {
+    const halfExtent = 46;
+    // Undulating crest so the hilltop is organic, not a straight tent line.
+    const crest =
+      roadY + 18 + 3.2 * Math.sin(distanceMeters * 0.045) + 2.2 * Math.sin(distanceMeters * 0.019 + 1.7);
+    const t = Math.min(1, Math.abs(lateral) / halfExtent);
+    return crest * Math.pow(Math.cos((t * Math.PI) / 2), 1.35);
+  }
+
   /** Smooth forested ridge from the ground up over the bore — the morro itself. */
   private addTunnelRidge(track: TrackDefinition, samples: readonly TrackSample[]): void {
     const day = this.timeOfDay === "day";
@@ -892,18 +902,14 @@ export class ThreeRaceRenderer implements RaceRenderer {
       roughness: 1,
     });
     const halfExtent = 46;
-    const peakAbove = 18;
+    const segments = 14;
     const ridgeRing = (s: TrackSample): ReadonlyArray<readonly [number, number]> => {
-      const peak = s.y + peakAbove;
-      return [
-        [-halfExtent, 0],
-        [-halfExtent * 0.62, Math.max(3, peak * 0.45)],
-        [-15, s.y + peakAbove * 0.78],
-        [0, peak],
-        [15, s.y + peakAbove * 0.78],
-        [halfExtent * 0.62, Math.max(3, peak * 0.45)],
-        [halfExtent, 0],
-      ] as const;
+      const ring: (readonly [number, number])[] = [];
+      for (let k = 0; k <= segments; k++) {
+        const lateral = -halfExtent + (2 * halfExtent * k) / segments;
+        ring.push([lateral, this.ridgeHeightAt(lateral, s.y, s.d)] as const);
+      }
+      return ring;
     };
     this.sweepProfile(samples, ridgeRing, ridgeMaterial);
   }
@@ -919,15 +925,18 @@ export class ThreeRaceRenderer implements RaceRenderer {
     const day = this.timeOfDay === "day";
 
     const halfExtent = 46;
-    const peak = pose.y + 18;
     const openingHalf = track.widthMeters / 2 + 1.3;
     const openingHeight = 5.6;
 
-    // Green hillside face (triangle silhouette) with the mouth punched out.
-    // Shape coords are relative to the road surface at this station.
+    // Green hillside face following the ridge's rounded silhouette, with the
+    // mouth punched out. Shape coords are relative to the road surface.
     const face = new THREE.Shape();
+    const faceSegments = 18;
     face.moveTo(-halfExtent, -pose.y);
-    face.lineTo(0, peak - pose.y);
+    for (let k = 0; k <= faceSegments; k++) {
+      const lateral = -halfExtent + (2 * halfExtent * k) / faceSegments;
+      face.lineTo(lateral, this.ridgeHeightAt(lateral, pose.y, distanceMeters) - pose.y);
+    }
     face.lineTo(halfExtent, -pose.y);
     face.closePath();
     const mouth = new THREE.Path();
@@ -1264,6 +1273,29 @@ function formatRaceTime(totalSeconds: number): string {
  * dark racing tarmac — fine low-contrast aggregate, faint longitudinal wear
  * bands and darker tire lines instead of the old starry speckle.
  */
+/**
+ * Organic hill: a flattened hemisphere whose outline is warped by a couple of
+ * low-frequency radial waves — a real morro silhouette, not a cone.
+ */
+function buildHillGeometry(radius: number, height: number, random: () => number): THREE.BufferGeometry {
+  const geometry = new THREE.SphereGeometry(1, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+  const phase1 = random() * Math.PI * 2;
+  const phase2 = random() * Math.PI * 2;
+  const amp1 = 0.12 + random() * 0.12;
+  const amp2 = 0.06 + random() * 0.1;
+  const positions = geometry.getAttribute("position");
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i);
+    const y = positions.getY(i);
+    const z = positions.getZ(i);
+    const angle = Math.atan2(z, x);
+    const warp = 1 + amp1 * Math.sin(3 * angle + phase1) + amp2 * Math.sin(5 * angle + phase2);
+    positions.setXYZ(i, x * radius * warp, y * height, z * radius * warp);
+  }
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function buildTiledAsphaltTexture(): THREE.CanvasTexture {
   const size = 128;
   const canvas = document.createElement("canvas");
