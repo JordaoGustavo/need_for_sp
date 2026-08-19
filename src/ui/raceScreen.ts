@@ -1,5 +1,5 @@
-import { BANDEIRANTITA } from "../content/tracks/bandeirantita";
 import { getCarById } from "../content/cars";
+import type { TrackDefinition } from "../domain/track";
 import type { CarDefinition } from "../domain/car";
 import { deriveHudState } from "../game/hudDerivation";
 import { EngineSound } from "../audio/engineSound";
@@ -13,6 +13,7 @@ import type { RenderedCar } from "../rendering/renderer";
 import type { PeerConnection } from "../net/webrtcConnection";
 
 export interface RaceScreenConfig {
+  readonly track: TrackDefinition;
   readonly localCar: CarDefinition;
   readonly remoteCarFallback: CarDefinition;
   readonly localPlayerId: string;
@@ -23,7 +24,7 @@ export interface RaceScreenConfig {
   readonly onExit: () => void;
 }
 
-/** Race step: renders the (currently single, drag-type) Bandeirantita track and HUD. */
+/** Race step: renders the configured track (drag or circuit) and HUD. */
 export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
   const root = document.createElement("div");
   root.className = "screen race-screen";
@@ -43,7 +44,7 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
   const input = new KeyboardInputController();
 
   const session = new RaceSession({
-    track: BANDEIRANTITA,
+    track: config.track,
     localCar: config.localCar,
     localPlayerId: config.localPlayerId,
     remotePlayerId: config.remotePlayerId,
@@ -97,7 +98,7 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
     }
 
     renderer.renderFrame({
-      track: BANDEIRANTITA,
+      track: config.track,
       cars,
       localPlayerHud: snapshot.localHud,
       hudSkin,

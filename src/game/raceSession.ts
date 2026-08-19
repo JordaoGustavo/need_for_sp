@@ -124,7 +124,9 @@ export class RaceSession {
         this.localState = resolveCarCollision(this.localState, this.interpolatedRemoteState());
       }
       this.localState = applyTrackBoundaryCollision(this.localState, this.config.track.widthMeters, dtSeconds);
-      this.localState = applyTrackLimits(this.localState, this.config.track.lengthMeters);
+      if (this.config.track.raceType === "drag") {
+        this.localState = applyTrackLimits(this.localState, this.config.track.lengthMeters);
+      }
       this.localProgress = this.rules.updateProgress(
         this.localProgress,
         this.localState,
@@ -166,7 +168,9 @@ export class RaceSession {
         dtSeconds,
       );
       this.localState = applyTrackBoundaryCollision(this.localState, this.config.track.widthMeters, dtSeconds);
-      this.localState = applyTrackLimits(this.localState, this.config.track.lengthMeters);
+      if (this.config.track.raceType === "drag") {
+        this.localState = applyTrackLimits(this.localState, this.config.track.lengthMeters);
+      }
     }
 
     return this.snapshot(countdownRemaining, racing, input, dtSeconds);

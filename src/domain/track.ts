@@ -12,9 +12,17 @@ export interface Checkpoint {
   readonly distanceMeters: number;
 }
 
+/** Control point of a circuit's closed centerline, in meters on the ground plane. */
+export interface TrackPathPoint {
+  readonly x: number;
+  readonly z: number;
+}
+
 export interface TrackDefinition {
   readonly id: string;
   readonly displayName: string;
+  /** One-line flavor text shown on the track-select screen. */
+  readonly description: string;
   readonly raceType: RaceType;
   /** Total length of one pass over the track path, in meters. */
   readonly lengthMeters: number;
@@ -24,6 +32,12 @@ export interface TrackDefinition {
   readonly checkpoints: readonly Checkpoint[];
   /** Half-width of the drivable path in meters, used for rendering and (later) collision. */
   readonly widthMeters: number;
+  /**
+   * Closed centerline control points for 'circuit' tracks (scaled by the
+   * renderer so the loop length equals lengthMeters). Absent for 'drag'
+   * tracks, whose path is a straight line.
+   */
+  readonly path?: readonly TrackPathPoint[];
 }
 
 /** Per-player race progress, updated every tick from CarRuntimeState.distanceMeters. */

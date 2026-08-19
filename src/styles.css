@@ -263,6 +263,68 @@ body {
   display: block;
 }
 
+/* --- Track select ------------------------------------------------------------ */
+
+.track-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(240px, 340px));
+  gap: 28px;
+  justify-content: center;
+  align-content: center;
+  z-index: 1;
+}
+
+.track-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+  background: rgba(14, 17, 23, 0.7);
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.track-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.track-card.selected {
+  border-color: var(--neon);
+  box-shadow: 0 0 24px rgba(184, 255, 31, 0.25);
+}
+
+.track-card-canvas {
+  width: 100%;
+  height: auto;
+}
+
+.track-card-name {
+  font-size: 1.3rem;
+  font-weight: 700;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.track-card-meta {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--neon);
+}
+
+.track-card-description {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
 .nfsu-pill-stack {
   position: absolute;
   right: 40px;

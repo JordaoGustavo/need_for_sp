@@ -1,16 +1,21 @@
 import type { CarDefinition } from "../domain/car";
+import type { TrackDefinition } from "../domain/track";
 import type { YoutuberProfile } from "../domain/youtuber";
+import { BANDEIRANTITA, getTrackById } from "../content/tracks";
 import { renderYoutuberSelectScreen } from "./menu/youtuberSelectScreen";
 import { renderCarSelectScreen, type RaceMode } from "./menu/carSelectScreen";
+import { renderTrackSelectScreen } from "./menu/trackSelectScreen";
 import { renderRoomScreen, type RoomScreenResult } from "./roomScreen";
 import { renderRaceScreen } from "./raceScreen";
 import { ensureMenuMusic, stopMenuMusic } from "../audio/menuMusic";
-import { parseRoomCodeFromUrl } from "../net/roomCode";
+import { parseRoomCodeFromUrl, parseTrackIdFromUrl } from "../net/roomCode";
 
 /**
- * Top-level screen state machine: Youtuber -> Carro -> (Solo: corrida direto |
- * Multiplayer: Sala -> corrida) -> volta ao início. Each screen is a
- * self-contained render function; app.ts only wires transitions.
+ * Top-level screen state machine:
+ * Youtuber -> Carro -> Pista -> (Solo: corrida | Multiplayer: Sala -> corrida).
+ * Guests joining via invite link skip track select — the host's track travels
+ * in the URL (ADR 0008). Each screen is a self-contained render function;
+ * app.ts only wires transitions.
  */
 export function startApp(container: HTMLElement): void {
   ensureMenuMusic();
@@ -30,8 +35,31 @@ export function startApp(container: HTMLElement): void {
   }
 
   function onCarSelected(youtuber: YoutuberProfile, car: CarDefinition, mode: RaceMode): void {
+    const isGuestJoin = parseRoomCodeFromUrl(window.location.href) !== null;
+    if (mode === "multiplayer" && isGuestJoin) {
+      // Guest: the host already picked the track; it rides in the invite URL.
+      const track = getTrackById(parseTrackIdFromUrl(window.location.href) ?? "") ?? BANDEIRANTITA;
+      showRoomScreen(youtuber, car, track);
+      return;
+    }
+
+    showScreen(
+      container,
+      renderTrackSelectScreen(
+        (track) => onTrackSelected(youtuber, car, mode, track),
+        () => onYoutuberSelected(youtuber),
+      ),
+    );
+  }
+
+  function onTrackSelected(
+    youtuber: YoutuberProfile,
+    car: CarDefinition,
+    mode: RaceMode,
+    track: TrackDefinition,
+  ): void {
     if (mode === "solo") {
-      startRace(car, {
+      startRace(track, car, {
         localPlayerId: "solo",
         remotePlayerId: "ghost",
         isHost: true,
@@ -39,20 +67,24 @@ export function startApp(container: HTMLElement): void {
       });
       return;
     }
+    showRoomScreen(youtuber, car, track);
+  }
 
+  function showRoomScreen(youtuber: YoutuberProfile, car: CarDefinition, track: TrackDefinition): void {
     showScreen(
       container,
       renderRoomScreen(
         youtuber,
         car,
-        (room) => onRoomReady(car, room),
+        track,
+        (room) => onRoomReady(car, track, room),
         () => onYoutuberSelected(youtuber),
       ),
     );
   }
 
-  function onRoomReady(car: CarDefinition, room: RoomScreenResult): void {
-    startRace(car, {
+  function onRoomReady(car: CarDefinition, track: TrackDefinition, room: RoomScreenResult): void {
+    startRace(track, car, {
       localPlayerId: room.isHost ? "host" : "guest",
       remotePlayerId: room.isHost ? "guest" : "host",
       isHost: room.isHost,
@@ -61,6 +93,7 @@ export function startApp(container: HTMLElement): void {
   }
 
   function startRace(
+    track: TrackDefinition,
     car: CarDefinition,
     session: Pick<
       Parameters<typeof renderRaceScreen>[0],
@@ -71,6 +104,7 @@ export function startApp(container: HTMLElement): void {
     showScreen(
       container,
       renderRaceScreen({
+        track,
         localCar: car,
         remoteCarFallback: car,
         ...session,

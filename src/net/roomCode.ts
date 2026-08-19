@@ -25,3 +25,20 @@ export function buildInviteUrl(baseUrl: string, roomCode: string): string {
 export function parseRoomCodeFromUrl(url: string): string | null {
   return new URL(url).searchParams.get(ROOM_QUERY_PARAM);
 }
+
+/**
+ * The host's chosen track rides along in the invite URL (same mechanism as
+ * the room code, ADR 0008), so the guest races on the same map with no extra
+ * protocol traffic.
+ */
+export const TRACK_QUERY_PARAM = "track";
+
+export function withTrackParam(url: string, trackId: string): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set(TRACK_QUERY_PARAM, trackId);
+  return parsed.toString();
+}
+
+export function parseTrackIdFromUrl(url: string): string | null {
+  return new URL(url).searchParams.get(TRACK_QUERY_PARAM);
+}

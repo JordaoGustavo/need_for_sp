@@ -5,6 +5,7 @@ import type { TrackDefinition } from "../../domain/track";
 import { applyCarEnvironmentMap, buildCarMesh, disposeCarMesh } from "./carMesh";
 import { animateCrowd, buildCrowd, sendCrowdToCar, type CrowdPerson } from "./crowd";
 import { TRACK_END_RUNOFF_METERS } from "../../physics/carPhysics";
+import { createTrackPathModel, type TrackPathModel, type TrackSample } from "./trackPath";
 
 const HUD_HEIGHT_FRACTION = 0.3;
 
@@ -27,6 +28,7 @@ export class ThreeRaceRenderer implements RaceRenderer {
   private height = 0;
   private readonly carEnvMap: THREE.Texture;
   private trackBuiltForId: string | null = null;
+  private pathModel: TrackPathModel | null = null;
   private crowdPeople: CrowdPerson[] = [];
   private crowdMobilized = false;
   private lastFrameMs: number | null = null;
@@ -117,6 +119,122 @@ export class ThreeRaceRenderer implements RaceRenderer {
   // --- scene construction -------------------------------------------------
 
   private buildTrackScene(track: TrackDefinition): void {
+    this.pathModel = createTrackPathModel(track);
+    if (track.raceType === "circuit") {
+      this.buildCircuitScene(track);
+      return;
+    }
+    this.buildDragScene(track);
+  }
+
+  /** Closed-loop scene (e.g. Interlagita): road ribbon along the curve. */
+  private buildCircuitScene(track: TrackDefinition): void {
+    const samples = this.pathModel!.sample(6);
+
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(1400, 1400),
+      new THREE.MeshStandardMaterial({ color: 0x0a0d13, roughness: 1 }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(-120, -0.02, -160);
+    this.scene.add(ground);
+
+    // Asphalt ribbon + unlit emissive edge lines so the loop reads at night.
+    this.addRibbon(samples, 0, track.widthMeters, new THREE.MeshStandardMaterial({ color: 0x1d222b, roughness: 0.95 }), 0);
+    const half = track.widthMeters / 2;
+    this.addRibbon(samples, -(half - 0.2), 0.3, new THREE.MeshBasicMaterial({ color: 0xf2d200 }), 0.01);
+    this.addRibbon(samples, half - 0.2, 0.3, new THREE.MeshBasicMaterial({ color: 0xff5a1f }), 0.01);
+
+    this.addStartFinishGantryAtPose(track);
+    this.addCircuitBuildings(track, samples);
+  }
+
+  /** Flat quad-strip following the centerline at a lateral offset. */
+  private addRibbon(
+    samples: readonly TrackSample[],
+    offsetMeters: number,
+    widthMeters: number,
+    material: THREE.Material,
+    y: number,
+  ): void {
+    const positions: number[] = [];
+    for (const s of samples) {
+      const cx = s.x + s.nx * offsetMeters;
+      const cz = s.z + s.nz * offsetMeters;
+      positions.push(cx - s.nx * (widthMeters / 2), y, cz - s.nz * (widthMeters / 2));
+      positions.push(cx + s.nx * (widthMeters / 2), y, cz + s.nz * (widthMeters / 2));
+    }
+    const indices: number[] = [];
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = i * 2;
+      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    this.scene.add(new THREE.Mesh(geometry, material));
+  }
+
+  private addStartFinishGantryAtPose(track: TrackDefinition): void {
+    const pose = this.pathModel!.pose(0, 0);
+    const anchor = new THREE.Group();
+    anchor.position.set(pose.x, 0, pose.z);
+    anchor.rotation.y = -pose.forwardAngleRad;
+
+    const stripe = new THREE.Mesh(
+      new THREE.PlaneGeometry(track.widthMeters, 2),
+      new THREE.MeshBasicMaterial({ map: buildCheckerTexture() }),
+    );
+    stripe.rotation.x = -Math.PI / 2;
+    stripe.position.y = 0.02;
+    anchor.add(stripe);
+
+    const gantryMaterial = new THREE.MeshStandardMaterial({ color: 0x2a303c, roughness: 0.6 });
+    const halfWidth = track.widthMeters / 2 + 1;
+    for (const side of [-halfWidth, halfWidth]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 7, 0.5), gantryMaterial);
+      post.position.set(side, 3.5, 0);
+      anchor.add(post);
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(halfWidth * 2 + 0.5, 1.2, 0.6), gantryMaterial);
+    beam.position.set(0, 7, 0);
+    anchor.add(beam);
+
+    this.scene.add(anchor);
+  }
+
+  private addCircuitBuildings(track: TrackDefinition, samples: readonly TrackSample[]): void {
+    const random = seededRandom(`${track.id}-blocks`);
+    const windowTexture = buildWindowTexture(random);
+    for (let i = 0; i < 46; i++) {
+      const s = samples[Math.floor(random() * samples.length)]!;
+      const side = random() < 0.5 ? -1 : 1;
+      const offset = track.widthMeters / 2 + 22 + random() * 40;
+      const x = s.x + s.nx * side * offset;
+      const z = s.z + s.nz * side * offset;
+      // Keep blocks clear of every part of the loop, not just this segment.
+      const clear = samples.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 > 19 ** 2);
+      if (!clear) continue;
+
+      const buildingHeight = 10 + random() * 26;
+      const building = new THREE.Mesh(
+        new THREE.BoxGeometry(10 + random() * 8, buildingHeight, 10 + random() * 8),
+        new THREE.MeshStandardMaterial({
+          color: new THREE.Color().setHSL(0.62, 0.15, 0.05 + random() * 0.05),
+          emissive: 0x2b3a55,
+          emissiveIntensity: 0.25,
+          emissiveMap: windowTexture,
+          roughness: 0.9,
+        }),
+      );
+      building.position.set(x, buildingHeight / 2, z);
+      this.scene.add(building);
+    }
+  }
+
+  /** Straight drag-strip scene (Bandeirantita, Imigrantita). */
+  private buildDragScene(track: TrackDefinition): void {
     const length = track.lengthMeters;
     const width = track.widthMeters;
 
@@ -359,24 +477,25 @@ export class ThreeRaceRenderer implements RaceRenderer {
         this.scene.add(entry.mesh);
         this.carMeshes[i] = entry;
       }
-      entry.mesh.position.set(car.state.lateralOffsetMeters, 0, -car.state.distanceMeters);
-      entry.mesh.rotation.y = -car.state.headingRad;
+      const pose = this.pathModel!.pose(car.state.distanceMeters, car.state.lateralOffsetMeters);
+      entry.mesh.position.set(pose.x, 0, pose.z);
+      entry.mesh.rotation.y = -(car.state.headingRad + pose.forwardAngleRad);
     }
   }
 
   private updateChaseCamera(localCar: RenderedCar): void {
-    const carX = localCar.state.lateralOffsetMeters;
-    const carZ = -localCar.state.distanceMeters;
-    const heading = localCar.state.headingRad;
+    const pose = this.pathModel!.pose(localCar.state.distanceMeters, localCar.state.lateralOffsetMeters);
+    // World yaw = track direction at this point + the car's own heading.
+    const yaw = localCar.state.headingRad + pose.forwardAngleRad;
     const speedFraction = Math.min(1, Math.abs(localCar.state.speedKmh) / 260);
 
-    // Rigid follow, rotated with the car's heading so steering/reversing keeps
-    // the camera behind the car (forward in world space is (sin h, -cos h)).
-    const sin = Math.sin(heading);
-    const cos = Math.cos(heading);
+    // Rigid follow, rotated with the car's world yaw so steering/reversing and
+    // circuit corners keep the camera behind the car (forward = (sin, -cos)).
+    const sin = Math.sin(yaw);
+    const cos = Math.cos(yaw);
     const back = 8.5 + speedFraction * 2;
-    this.camera.position.set(carX - sin * back, 3.2 + speedFraction * 0.6, carZ + cos * back);
-    this.camera.lookAt(carX + sin * 12, 1.2, carZ - cos * 12);
+    this.camera.position.set(pose.x - sin * back, 3.2 + speedFraction * 0.6, pose.z + cos * back);
+    this.camera.lookAt(pose.x + sin * 12, 1.2, pose.z - cos * 12);
   }
 
   private drawOverlay(input: RaceRenderInput): void {
@@ -438,31 +557,50 @@ export class ThreeRaceRenderer implements RaceRenderer {
     ctx.fillStyle = "rgba(10,13,18,0.6)";
     ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
 
-    // Track path: the drag strip runs bottom (start) to top (finish).
-    const pathTop = cy - radius * 0.72;
-    const pathBottom = cy + radius * 0.72;
-    const metersToPx = (pathBottom - pathTop) / input.track.lengthMeters;
+    // Fit the real track outline (any shape) into the circle.
+    const samples = this.pathModel!.sample(input.track.lengthMeters / 80);
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const s of samples) {
+      minX = Math.min(minX, s.x); maxX = Math.max(maxX, s.x);
+      minZ = Math.min(minZ, s.z); maxZ = Math.max(maxZ, s.z);
+    }
+    const extent = Math.max(maxX - minX, maxZ - minZ, 1);
+    const scale = (radius * 1.44) / extent;
+    const midX = (minX + maxX) / 2;
+    const midZ = (minZ + maxZ) / 2;
+    const toScreen = (x: number, z: number): readonly [number, number] =>
+      [cx + (x - midX) * scale, cy + (z - midZ) * scale] as const;
 
     ctx.strokeStyle = "rgba(255,255,255,0.9)";
-    ctx.lineWidth = radius * 0.14;
+    ctx.lineWidth = radius * (this.pathModel!.closed ? 0.09 : 0.14);
     ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
-    ctx.moveTo(cx, pathBottom);
-    ctx.lineTo(cx, pathTop);
+    samples.forEach((s, i) => {
+      const [x, y] = toScreen(s.x, s.z);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
     ctx.stroke();
 
-    // Finish tick
-    ctx.strokeStyle = "#0c0e14";
-    ctx.lineWidth = radius * 0.05;
+    // Start/finish tick.
+    const startPose = this.pathModel!.pose(0, 0);
+    const [sx, sy] = toScreen(startPose.x, startPose.z);
+    ctx.fillStyle = "#0c0e14";
     ctx.beginPath();
-    ctx.moveTo(cx - radius * 0.1, pathTop);
-    ctx.lineTo(cx + radius * 0.1, pathTop);
-    ctx.stroke();
+    ctx.arc(sx, sy, radius * 0.06, 0, Math.PI * 2);
+    ctx.fill();
 
     for (const car of input.cars) {
-      const y = pathBottom - car.state.distanceMeters * metersToPx;
-      const x = cx + car.state.lateralOffsetMeters * metersToPx * 6;
-      this.drawMinimapArrow(x, y, car.isLocalPlayer ? "#39d353" : "#ff9b2f", radius * 0.14, car.state.headingRad);
+      const pose = this.pathModel!.pose(car.state.distanceMeters, car.state.lateralOffsetMeters);
+      const [x, y] = toScreen(pose.x, pose.z);
+      this.drawMinimapArrow(
+        x,
+        y,
+        car.isLocalPlayer ? "#39d353" : "#ff9b2f",
+        radius * 0.14,
+        car.state.headingRad + pose.forwardAngleRad,
+      );
     }
     ctx.restore();
 
@@ -523,6 +661,16 @@ export class ThreeRaceRenderer implements RaceRenderer {
     ctx.fillStyle = "#b8ff1f";
     ctx.font = "bold 26px 'Chakra Petch', monospace";
     ctx.fillText(formatRaceTime(input.raceTimeSeconds), x, 112);
+
+    if (input.track.laps > 1) {
+      const lap = Math.min(
+        input.track.laps,
+        Math.floor(localCar.state.distanceMeters / input.track.lengthMeters) + 1,
+      );
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold italic 26px 'Chakra Petch', sans-serif";
+      ctx.fillText(`VOLTA ${lap}/${input.track.laps}`, x, 148);
+    }
     ctx.restore();
   }
 

@@ -1,8 +1,9 @@
 import { defaultSignalingUrl } from "../config";
 import { hostRoom, joinRoom } from "../net/roomConnection";
-import { parseRoomCodeFromUrl } from "../net/roomCode";
+import { parseRoomCodeFromUrl, withTrackParam } from "../net/roomCode";
 import type { PeerConnection } from "../net/webrtcConnection";
 import type { CarDefinition } from "../domain/car";
+import type { TrackDefinition } from "../domain/track";
 import type { YoutuberProfile } from "../domain/youtuber";
 
 export interface RoomScreenResult {
@@ -20,6 +21,7 @@ export interface RoomScreenResult {
 export function renderRoomScreen(
   youtuber: YoutuberProfile,
   car: CarDefinition,
+  track: TrackDefinition,
   onReady: (result: RoomScreenResult) => void,
   onBack: () => void,
 ): HTMLElement {
@@ -65,9 +67,10 @@ export function renderRoomScreen(
       });
   } else {
     status.textContent = "Criando sala...";
+    // The chosen track rides in the invite URL so the guest loads the same map.
     const { roomCode, inviteUrl, peerConnectionPromise } = hostRoom(
       signalingUrl,
-      window.location.href,
+      withTrackParam(window.location.href, track.id),
     );
 
     linkInput.value = inviteUrl;
