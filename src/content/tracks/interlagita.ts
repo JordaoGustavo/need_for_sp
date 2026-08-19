@@ -1,49 +1,64 @@
 import type { TrackDefinition } from "../../domain/track";
 
 /**
- * Interlagita — circuito fechado inspirado no desenho de Interlagos, correndo
- * no sentido anti-horário como o original: largada na reta principal, o "S"
- * na sequência, o arco da Curva do Sol abrindo para a reta oposta, o miolo
- * travado e a subida longa de volta à reta. Duas voltas para vencer.
+ * Interlagita — circuito fechado com o desenho do Autódromo de Interlagos
+ * (traçado público), anti-horário como o real: Reta dos Boxes, S do Senna,
+ * Curva do Sol, Reta Oposta, Descida do Lago, Ferradura, Laranjinha,
+ * Pinheirinho, Bico de Pato, Mergulho, Junção e a Subida dos Boxes fechando
+ * a volta. Duas voltas para vencer.
  *
- * The control points below are the closed centerline (roughly in meters);
- * the renderer rescales the loop so its length matches lengthMeters exactly.
+ * Control points digitized from the public track map (standard orientation:
+ * pit straight on top, infield below); the renderer rescales the loop so one
+ * lap equals lengthMeters.
  */
 export const INTERLAGITA: TrackDefinition = {
   id: "interlagita",
   displayName: "Interlagita",
-  description: "Circuito fechado inspirado em Interlagos — 2 voltas decidem.",
+  description: "O desenho de Interlagos: S do Senna à Junção — 2 voltas decidem.",
   raceType: "circuit",
   lengthMeters: 1800,
   laps: 2,
   checkpoints: [
-    { id: "s-do-senna", distanceMeters: 450 },
-    { id: "reta-oposta", distanceMeters: 900 },
-    { id: "miolo", distanceMeters: 1350 },
+    { id: "curva-do-sol", distanceMeters: 450 },
+    { id: "descida-do-lago", distanceMeters: 900 },
+    { id: "bico-de-pato", distanceMeters: 1350 },
   ],
   widthMeters: 12,
+  scenery: "city",
   path: [
-    // Main straight (start line near the first point, heading -z)
-    { x: 0, z: 0 },
-    { x: 0, z: -170 },
-    // "S" complex: dive left, flick right
-    { x: -45, z: -235 },
-    { x: -20, z: -300 },
-    { x: -80, z: -350 },
-    // Curva do Sol: long left arc onto the back straight
-    { x: -170, z: -365 },
-    { x: -235, z: -300 },
-    // Reta Oposta (back straight)
-    { x: -250, z: -160 },
-    { x: -245, z: -20 },
-    // Tight infield: hairpin right, short left, loop back
-    { x: -215, z: 60 },
-    { x: -150, z: 45 },
-    { x: -155, z: -40 },
-    { x: -110, z: -95 },
-    // Long climbing arc back to the main straight
-    { x: -70, z: 30 },
-    { x: -45, z: 95 },
-    { x: -8, z: 70 },
+    // Reta dos Boxes (start/finish), heading "west" along the top
+    { x: 40, z: -18 },
+    { x: -60, z: -6 },
+    // S do Senna: downhill left-right flick
+    { x: -105, z: 25 },
+    { x: -95, z: 70 },
+    // Curva do Sol: long left onto the back straight
+    { x: -130, z: 110 },
+    { x: -112, z: 160 },
+    // Reta Oposta
+    { x: 0, z: 185 },
+    { x: 120, z: 195 },
+    // Descida do Lago: double left climbing into the infield
+    { x: 160, z: 165 },
+    { x: 146, z: 120 },
+    // Up to Ferradura (right horseshoe at the top of the infield)
+    { x: 178, z: 85 },
+    { x: 205, z: 45 },
+    { x: 182, z: 8 },
+    // Laranjinha (tight right) and down to Pinheirinho (left)
+    { x: 150, z: 40 },
+    { x: 113, z: 75 },
+    { x: 76, z: 95 },
+    // Bico de Pato (right hairpin) and Mergulho
+    { x: 95, z: 133 },
+    { x: 60, z: 150 },
+    { x: 44, z: 116 },
+    // Junção (right) into the long climbing Subida dos Boxes
+    { x: 20, z: 148 },
+    { x: -12, z: 128 },
+    { x: 12, z: 103 },
+    { x: 80, z: 58 },
+    // Arquibancadas: left onto the pit straight, closing the lap
+    { x: 138, z: 18 },
   ],
 };

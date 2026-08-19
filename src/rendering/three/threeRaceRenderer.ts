@@ -93,12 +93,8 @@ export class ThreeRaceRenderer implements RaceRenderer {
     // track and surrounds it.
     if (!this.crowdMobilized && input.finished && localCar && Math.abs(localCar.state.speedKmh) < 1) {
       this.crowdMobilized = true;
-      sendCrowdToCar(
-        this.crowdPeople,
-        localCar.state.lateralOffsetMeters,
-        -localCar.state.distanceMeters,
-        seededRandom(`${input.track.id}-mob`),
-      );
+      const carPose = this.pathModel!.pose(localCar.state.distanceMeters, localCar.state.lateralOffsetMeters);
+      sendCrowdToCar(this.crowdPeople, carPose.x, carPose.z, seededRandom(`${input.track.id}-mob`));
     }
     animateCrowd(this.crowdPeople, nowMs / 1000, dtSeconds);
 
@@ -120,33 +116,92 @@ export class ThreeRaceRenderer implements RaceRenderer {
 
   private buildTrackScene(track: TrackDefinition): void {
     this.pathModel = createTrackPathModel(track);
-    if (track.raceType === "circuit") {
-      this.buildCircuitScene(track);
-      return;
+    this.applySceneryAtmosphere(track);
+
+    const isCircuit = track.raceType === "circuit";
+    const from = isCircuit ? 0 : -20;
+    const to = isCircuit ? track.lengthMeters : track.lengthMeters + TRACK_END_RUNOFF_METERS + 20;
+    const samples = this.pathModel.sample(6, from, to);
+
+    this.addGround(track, samples);
+
+    // Road surface + emissive edge lines (readable at night on any curve).
+    const asphalt = new THREE.MeshStandardMaterial({
+      map: buildTiledAsphaltTexture(),
+      roughness: 0.95,
+    });
+    this.addRibbon(samples, 0, track.widthMeters, asphalt, 0, true);
+    const half = track.widthMeters / 2;
+    this.addRibbon(samples, -(half - 0.25), 0.3, new THREE.MeshBasicMaterial({ color: 0xf2d200 }), 0.012);
+    this.addRibbon(samples, half - 0.25, 0.3, new THREE.MeshBasicMaterial({ color: 0xff5a1f }), 0.012);
+    this.addCenterDashes(track, from + 8, to - 8);
+
+    if (isCircuit) {
+      this.addCheckerStripe(track, 0);
+      this.addGantry(track, 0, false);
+    } else {
+      this.addCheckerStripe(track, 0);
+      this.addCheckerStripe(track, track.lengthMeters);
+      this.addGantry(track, track.lengthMeters, true);
+      this.addGuardRails(track, samples);
+      this.addEndWall(track);
+
+      const crowd = buildCrowd(
+        seededRandom(`${track.id}-crowd`),
+        (d, lat) => this.pathModel!.pose(d, lat),
+        track.lengthMeters,
+        track.widthMeters,
+        TRACK_END_RUNOFF_METERS,
+      );
+      this.scene.add(crowd.group);
+      this.crowdPeople = crowd.people;
+
+      // Floodlights over the finish area so the celebration is actually lit.
+      for (const distance of [track.lengthMeters + 5, track.lengthMeters + TRACK_END_RUNOFF_METERS * 0.6]) {
+        const pose = this.pathModel.pose(distance, 0);
+        const flood = new THREE.PointLight(0xfff0cc, 60, 55, 1.6);
+        flood.position.set(pose.x, 9, pose.z);
+        this.scene.add(flood);
+      }
     }
-    this.buildDragScene(track);
+
+    this.addStreetLights(track, from, to);
+    this.addScenery(track, samples);
+    this.addTunnels(track);
   }
 
-  /** Closed-loop scene (e.g. Interlagita): road ribbon along the curve. */
-  private buildCircuitScene(track: TrackDefinition): void {
-    const samples = this.pathModel!.sample(6);
+  /** Night mood per scenery: city glow, open highway, or serra fog over the mata. */
+  private applySceneryAtmosphere(track: TrackDefinition): void {
+    switch (track.scenery) {
+      case "serra":
+        this.scene.background = new THREE.Color(0x04100a);
+        this.scene.fog = new THREE.Fog(0x04100a, 40, 230);
+        return;
+      case "highway":
+        this.scene.background = new THREE.Color(0x05070d);
+        this.scene.fog = new THREE.Fog(0x05070d, 70, 380);
+        return;
+      default:
+        this.scene.background = new THREE.Color(0x05070f);
+        this.scene.fog = new THREE.Fog(0x05070f, 60, 320);
+    }
+  }
 
+  private addGround(track: TrackDefinition, samples: readonly TrackSample[]): void {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const s of samples) {
+      minX = Math.min(minX, s.x); maxX = Math.max(maxX, s.x);
+      minZ = Math.min(minZ, s.z); maxZ = Math.max(maxZ, s.z);
+    }
+    const margin = 320;
+    const color = track.scenery === "serra" ? 0x08130a : track.scenery === "highway" ? 0x0b100c : 0x0a0d13;
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(1400, 1400),
-      new THREE.MeshStandardMaterial({ color: 0x0a0d13, roughness: 1 }),
+      new THREE.PlaneGeometry(maxX - minX + margin * 2, maxZ - minZ + margin * 2),
+      new THREE.MeshStandardMaterial({ color, roughness: 1 }),
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(-120, -0.02, -160);
+    ground.position.set((minX + maxX) / 2, -0.02, (minZ + maxZ) / 2);
     this.scene.add(ground);
-
-    // Asphalt ribbon + unlit emissive edge lines so the loop reads at night.
-    this.addRibbon(samples, 0, track.widthMeters, new THREE.MeshStandardMaterial({ color: 0x1d222b, roughness: 0.95 }), 0);
-    const half = track.widthMeters / 2;
-    this.addRibbon(samples, -(half - 0.2), 0.3, new THREE.MeshBasicMaterial({ color: 0xf2d200 }), 0.01);
-    this.addRibbon(samples, half - 0.2, 0.3, new THREE.MeshBasicMaterial({ color: 0xff5a1f }), 0.01);
-
-    this.addStartFinishGantryAtPose(track);
-    this.addCircuitBuildings(track, samples);
   }
 
   /** Flat quad-strip following the centerline at a lateral offset. */
@@ -156,13 +211,44 @@ export class ThreeRaceRenderer implements RaceRenderer {
     widthMeters: number,
     material: THREE.Material,
     y: number,
+    withUvs = false,
   ): void {
     const positions: number[] = [];
+    const uvs: number[] = [];
     for (const s of samples) {
       const cx = s.x + s.nx * offsetMeters;
       const cz = s.z + s.nz * offsetMeters;
       positions.push(cx - s.nx * (widthMeters / 2), y, cz - s.nz * (widthMeters / 2));
       positions.push(cx + s.nx * (widthMeters / 2), y, cz + s.nz * (widthMeters / 2));
+      uvs.push(0, s.d / 6, widthMeters / 6, s.d / 6);
+    }
+    const indices: number[] = [];
+    for (let i = 0; i < samples.length - 1; i++) {
+      const a = i * 2;
+      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    if (withUvs) geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    this.scene.add(new THREE.Mesh(geometry, material));
+  }
+
+  /** Vertical quad-strip (barriers, tunnel walls) between y0 and y1. */
+  private addWallRibbon(
+    samples: readonly TrackSample[],
+    offsetMeters: number,
+    y0: number,
+    y1: number,
+    material: THREE.Material,
+  ): void {
+    const positions: number[] = [];
+    for (const s of samples) {
+      const cx = s.x + s.nx * offsetMeters;
+      const cz = s.z + s.nz * offsetMeters;
+      positions.push(cx, y0, cz);
+      positions.push(cx, y1, cz);
     }
     const indices: number[] = [];
     for (let i = 0; i < samples.length - 1; i++) {
@@ -176,12 +262,33 @@ export class ThreeRaceRenderer implements RaceRenderer {
     this.scene.add(new THREE.Mesh(geometry, material));
   }
 
-  private addStartFinishGantryAtPose(track: TrackDefinition): void {
-    const pose = this.pathModel!.pose(0, 0);
+  private addCenterDashes(track: TrackDefinition, fromMeters: number, toMeters: number): void {
+    const material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 });
+    const geometry = new THREE.PlaneGeometry(0.25, 5);
+    for (let d = fromMeters; d < toMeters; d += 12) {
+      const pose = this.pathModel!.pose(d, 0);
+      const dash = new THREE.Mesh(geometry, material);
+      // Yaw to the track direction first, then lay the plane flat on the road.
+      dash.rotation.order = "YXZ";
+      dash.rotation.y = -pose.forwardAngleRad;
+      dash.rotation.x = -Math.PI / 2;
+      dash.position.set(pose.x, 0.01, pose.z);
+      this.scene.add(dash);
+    }
+  }
+
+  /** Group anchored on the path at a given distance, rotated to face along it. */
+  private anchorAt(distanceMeters: number): THREE.Group {
+    const pose = this.pathModel!.pose(distanceMeters, 0);
     const anchor = new THREE.Group();
     anchor.position.set(pose.x, 0, pose.z);
     anchor.rotation.y = -pose.forwardAngleRad;
+    this.scene.add(anchor);
+    return anchor;
+  }
 
+  private addCheckerStripe(track: TrackDefinition, distanceMeters: number): void {
+    const anchor = this.anchorAt(distanceMeters);
     const stripe = new THREE.Mesh(
       new THREE.PlaneGeometry(track.widthMeters, 2),
       new THREE.MeshBasicMaterial({ map: buildCheckerTexture() }),
@@ -189,7 +296,10 @@ export class ThreeRaceRenderer implements RaceRenderer {
     stripe.rotation.x = -Math.PI / 2;
     stripe.position.y = 0.02;
     anchor.add(stripe);
+  }
 
+  private addGantry(track: TrackDefinition, distanceMeters: number, withBanner: boolean): void {
+    const anchor = this.anchorAt(distanceMeters);
     const gantryMaterial = new THREE.MeshStandardMaterial({ color: 0x2a303c, roughness: 0.6 });
     const halfWidth = track.widthMeters / 2 + 1;
     for (const side of [-halfWidth, halfWidth]) {
@@ -200,20 +310,148 @@ export class ThreeRaceRenderer implements RaceRenderer {
     const beam = new THREE.Mesh(new THREE.BoxGeometry(halfWidth * 2 + 0.5, 1.2, 0.6), gantryMaterial);
     beam.position.set(0, 7, 0);
     anchor.add(beam);
-
-    this.scene.add(anchor);
+    if (withBanner) {
+      const banner = new THREE.Mesh(
+        new THREE.PlaneGeometry(halfWidth * 2, 1),
+        new THREE.MeshBasicMaterial({ map: buildFinishBannerTexture(), transparent: true }),
+      );
+      banner.position.set(0, 6.2, 0.35);
+      anchor.add(banner);
+    }
   }
 
-  private addCircuitBuildings(track: TrackDefinition, samples: readonly TrackSample[]): void {
-    const random = seededRandom(`${track.id}-blocks`);
+  private addGuardRails(track: TrackDefinition, samples: readonly TrackSample[]): void {
+    const barrierMaterial = new THREE.MeshStandardMaterial({
+      color: 0x353c48,
+      roughness: 0.7,
+      side: THREE.DoubleSide,
+    });
+    const stripeMaterial = new THREE.MeshBasicMaterial({ color: 0xff5a1f, side: THREE.DoubleSide });
+    for (const side of [-1, 1]) {
+      const offset = side * (track.widthMeters / 2 + 0.6);
+      this.addWallRibbon(samples, offset, 0, 0.72, barrierMaterial);
+      this.addWallRibbon(samples, offset, 0.72, 0.86, stripeMaterial);
+    }
+  }
+
+  /** Striped crash wall + tire stacks closing off the runoff past the finish. */
+  private addEndWall(track: TrackDefinition): void {
+    const anchor = this.anchorAt(track.lengthMeters + TRACK_END_RUNOFF_METERS + 1.5);
+    const width = track.widthMeters + 4;
+
+    const wall = new THREE.Mesh(
+      new THREE.BoxGeometry(width, 1.4, 0.6),
+      new THREE.MeshStandardMaterial({ color: 0x353c48, roughness: 0.7 }),
+    );
+    wall.position.y = 0.7;
+    anchor.add(wall);
+
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(width + 0.05, 0.3, 0.62),
+      new THREE.MeshStandardMaterial({ color: 0xff5a1f, emissive: 0xff5a1f, emissiveIntensity: 0.5 }),
+    );
+    stripe.position.y = 1.0;
+    anchor.add(stripe);
+
+    const tireMaterial = new THREE.MeshStandardMaterial({ color: 0x101318, roughness: 0.95 });
+    const tireGeometry = new THREE.TorusGeometry(0.34, 0.14, 8, 14);
+    tireGeometry.rotateX(Math.PI / 2);
+    for (let x = -width / 2 + 1; x <= width / 2 - 1; x += 1.1) {
+      for (let level = 0; level < 3; level++) {
+        const tire = new THREE.Mesh(tireGeometry, tireMaterial);
+        tire.position.set(x, 0.15 + level * 0.28, 0.85);
+        anchor.add(tire);
+      }
+    }
+  }
+
+  private addStreetLights(track: TrackDefinition, fromMeters: number, toMeters: number): void {
+    const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x1c212b, roughness: 0.6 });
+    const lampMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffe9b8,
+      emissive: 0xffd888,
+      emissiveIntensity: 2.5,
+    });
+    const poleGeometry = new THREE.CylinderGeometry(0.12, 0.16, 7, 8);
+    const armGeometry = new THREE.BoxGeometry(2.4, 0.15, 0.15);
+    const lampGeometry = new THREE.BoxGeometry(0.9, 0.18, 0.5);
+    const spacing = track.scenery === "serra" ? 80 : 40;
+
+    for (let d = Math.max(20, fromMeters + 20); d < toMeters - 10; d += spacing) {
+      if (this.isInsideTunnel(track, d, 12)) continue;
+      const side = Math.round(d / spacing) % 2 === 0 ? -1 : 1;
+      const pose = this.pathModel!.pose(d, side * (track.widthMeters / 2 + 1.6));
+      const anchor = new THREE.Group();
+      anchor.position.set(pose.x, 0, pose.z);
+      anchor.rotation.y = -pose.forwardAngleRad;
+      this.scene.add(anchor);
+
+      const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+      pole.position.y = 3.5;
+      anchor.add(pole);
+      const arm = new THREE.Mesh(armGeometry, poleMaterial);
+      arm.position.set(-side * 1.1, 6.9, 0);
+      anchor.add(arm);
+      const lamp = new THREE.Mesh(lampGeometry, lampMaterial);
+      lamp.position.set(-side * 2.1, 6.8, 0);
+      anchor.add(lamp);
+
+      // Pool of light on the asphalt, faked with an additive gradient decal —
+      // real PointLights at every pole would blow the light budget.
+      const pool = new THREE.Mesh(
+        new THREE.PlaneGeometry(9, 9),
+        new THREE.MeshBasicMaterial({
+          map: lightPoolTexture(),
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          opacity: 0.35,
+        }),
+      );
+      pool.rotation.x = -Math.PI / 2;
+      pool.position.set(-side * 2.1, 0.015, 0);
+      anchor.add(pool);
+    }
+  }
+
+  private isInsideTunnel(track: TrackDefinition, distanceMeters: number, marginMeters: number): boolean {
+    return (track.tunnels ?? []).some(
+      (t) => distanceMeters > t.startMeters - marginMeters && distanceMeters < t.endMeters + marginMeters,
+    );
+  }
+
+  /** Surroundings per scenery: city blocks, highway warehouses+fields, or mata fechada. */
+  private addScenery(track: TrackDefinition, samples: readonly TrackSample[]): void {
+    const random = seededRandom(`${track.id}-scenery`);
+    switch (track.scenery) {
+      case "city":
+        this.addCityBuildings(track, samples, random, Math.round(track.lengthMeters / 34));
+        return;
+      case "highway":
+        this.addCityBuildings(track, samples, random, Math.round(track.lengthMeters / 140));
+        this.addTrees(track, samples, random, Math.round(track.lengthMeters / 22), 8, 60);
+        return;
+      case "serra":
+        // Mata Atlântica pressing against the road (SP-160 style).
+        this.addTrees(track, samples, random, Math.round(track.lengthMeters / 7), 3.5, 46);
+        return;
+    }
+  }
+
+  private addCityBuildings(
+    track: TrackDefinition,
+    samples: readonly TrackSample[],
+    random: () => number,
+    count: number,
+  ): void {
     const windowTexture = buildWindowTexture(random);
-    for (let i = 0; i < 46; i++) {
+    for (let i = 0; i < count; i++) {
       const s = samples[Math.floor(random() * samples.length)]!;
       const side = random() < 0.5 ? -1 : 1;
       const offset = track.widthMeters / 2 + 22 + random() * 40;
       const x = s.x + s.nx * side * offset;
       const z = s.z + s.nz * side * offset;
-      // Keep blocks clear of every part of the loop, not just this segment.
+      // Keep blocks clear of every part of the path, not just this segment.
       const clear = samples.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 > 19 ** 2);
       if (!clear) continue;
 
@@ -233,229 +471,72 @@ export class ThreeRaceRenderer implements RaceRenderer {
     }
   }
 
-  /** Straight drag-strip scene (Bandeirantita, Imigrantita). */
-  private buildDragScene(track: TrackDefinition): void {
-    const length = track.lengthMeters;
-    const width = track.widthMeters;
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(400, length + 400),
-      new THREE.MeshStandardMaterial({ color: 0x0a0d13, roughness: 1 }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(0, -0.02, -length / 2);
-    this.scene.add(ground);
-
-    const road = new THREE.Mesh(
-      new THREE.PlaneGeometry(width, length + 120),
-      new THREE.MeshStandardMaterial({ map: buildAsphaltTexture(width, length + 120), roughness: 0.95 }),
-    );
-    road.rotation.x = -Math.PI / 2;
-    road.position.set(0, 0, -(length + 120) / 2 + 40);
-    this.scene.add(road);
-
-    this.addLine(0, "#ffffff", 0.35, track, true);
-    this.addLine(-width / 2 + 0.3, "#f2d200", 1, track, false);
-    this.addLine(width / 2 - 0.3, "#f2d200", 1, track, false);
-
-    this.addStartAndFinishLines(track);
-    this.addBarriers(track);
-    this.addStreetLights(track);
-    this.addBuildings(track);
-    this.addEndWall(track);
-
-    const crowd = buildCrowd(
-      seededRandom(`${track.id}-crowd`),
-      track.lengthMeters,
-      track.widthMeters,
-      TRACK_END_RUNOFF_METERS,
-    );
-    this.scene.add(crowd.group);
-    this.crowdPeople = crowd.people;
-
-    // Floodlights over the finish area so the celebration is actually lit.
-    for (const distance of [track.lengthMeters + 5, track.lengthMeters + TRACK_END_RUNOFF_METERS * 0.6]) {
-      const flood = new THREE.PointLight(0xfff0cc, 60, 55, 1.6);
-      flood.position.set(0, 9, -distance);
-      this.scene.add(flood);
-    }
-  }
-
-  /** Striped barrier wall closing off the runoff area past the finish line. */
-  private addEndWall(track: TrackDefinition): void {
-    const wallZ = -(track.lengthMeters + TRACK_END_RUNOFF_METERS + 1.5);
-    const width = track.widthMeters + 4;
-
-    const wall = new THREE.Mesh(
-      new THREE.BoxGeometry(width, 1.4, 0.6),
-      new THREE.MeshStandardMaterial({ color: 0x353c48, roughness: 0.7 }),
-    );
-    wall.position.set(0, 0.7, wallZ);
-    this.scene.add(wall);
-
-    const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(width + 0.05, 0.3, 0.62),
-      new THREE.MeshStandardMaterial({
-        color: 0xff5a1f,
-        emissive: 0xff5a1f,
-        emissiveIntensity: 0.5,
-      }),
-    );
-    stripe.position.set(0, 1.0, wallZ);
-    this.scene.add(stripe);
-
-    // A row of tire stacks in front of the wall.
-    const tireMaterial = new THREE.MeshStandardMaterial({ color: 0x101318, roughness: 0.95 });
-    const tireGeometry = new THREE.TorusGeometry(0.34, 0.14, 8, 14);
-    tireGeometry.rotateX(Math.PI / 2);
-    for (let x = -width / 2 + 1; x <= width / 2 - 1; x += 1.1) {
-      for (let level = 0; level < 3; level++) {
-        const tire = new THREE.Mesh(tireGeometry, tireMaterial);
-        tire.position.set(x, 0.15 + level * 0.28, wallZ + 0.85);
-        this.scene.add(tire);
-      }
-    }
-  }
-
-  private addLine(
-    x: number,
-    color: string,
-    opacity: number,
+  private addTrees(
     track: TrackDefinition,
-    dashed: boolean,
+    samples: readonly TrackSample[],
+    random: () => number,
+    count: number,
+    minOffset: number,
+    maxOffset: number,
   ): void {
-    const length = track.lengthMeters + 120;
-    const material = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(color),
-      transparent: opacity < 1,
-      opacity,
-    });
-    if (dashed) {
-      for (let z = 30; z > -length; z -= 12) {
-        const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 5), material);
-        dash.rotation.x = -Math.PI / 2;
-        dash.position.set(x, 0.01, z);
-        this.scene.add(dash);
-      }
-    } else {
-      const line = new THREE.Mesh(new THREE.PlaneGeometry(0.25, length), material);
-      line.rotation.x = -Math.PI / 2;
-      line.position.set(x, 0.01, -length / 2 + 40);
-      this.scene.add(line);
-    }
-  }
-
-  private addStartAndFinishLines(track: TrackDefinition): void {
-    const texture = buildCheckerTexture();
-    for (const distance of [0, track.lengthMeters]) {
-      const stripe = new THREE.Mesh(
-        new THREE.PlaneGeometry(track.widthMeters, 2),
-        new THREE.MeshBasicMaterial({ map: texture }),
-      );
-      stripe.rotation.x = -Math.PI / 2;
-      stripe.position.set(0, 0.02, -distance);
-      this.scene.add(stripe);
-    }
-
-    // Overhead gantry at the finish line, so the player sees it coming from afar.
-    const gantryMaterial = new THREE.MeshStandardMaterial({ color: 0x2a303c, roughness: 0.6 });
-    const halfWidth = track.widthMeters / 2 + 1;
-    for (const side of [-halfWidth, halfWidth]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 7, 0.5), gantryMaterial);
-      post.position.set(side, 3.5, -track.lengthMeters);
-      this.scene.add(post);
-    }
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(halfWidth * 2 + 0.5, 1.2, 0.6), gantryMaterial);
-    beam.position.set(0, 7, -track.lengthMeters);
-    this.scene.add(beam);
-    const banner = new THREE.Mesh(
-      new THREE.PlaneGeometry(halfWidth * 2, 1),
-      new THREE.MeshBasicMaterial({ map: buildFinishBannerTexture(), transparent: true }),
+    const trunkGeometry = new THREE.CylinderGeometry(0.18, 0.26, 2.2, 6);
+    const foliageGeometry = new THREE.ConeGeometry(1.9, 4.4, 7);
+    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x2b2015, roughness: 0.95 });
+    const foliageMaterials = [0x0d2d16, 0x123a1c, 0x0a2411].map(
+      (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.95 }),
     );
-    banner.position.set(0, 6.2, -track.lengthMeters + 0.35);
-    this.scene.add(banner);
-  }
+    const clearance = track.widthMeters / 2 + 2.4;
 
-  private addBarriers(track: TrackDefinition): void {
-    const length = track.lengthMeters + 120;
-    const barrierMaterial = new THREE.MeshStandardMaterial({ color: 0x353c48, roughness: 0.7 });
-    const stripeMaterial = new THREE.MeshBasicMaterial({ color: 0xff5a1f });
-    for (const side of [-1, 1]) {
-      const x = side * (track.widthMeters / 2 + 0.6);
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.9, length), barrierMaterial);
-      wall.position.set(x, 0.45, -length / 2 + 40);
-      this.scene.add(wall);
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, length), stripeMaterial);
-      stripe.position.set(x, 0.75, -length / 2 + 40);
-      this.scene.add(stripe);
-    }
-  }
+    for (let i = 0; i < count; i++) {
+      const s = samples[Math.floor(random() * samples.length)]!;
+      const side = random() < 0.5 ? -1 : 1;
+      const offset = track.widthMeters / 2 + minOffset + random() * (maxOffset - minOffset);
+      const x = s.x + s.nx * side * offset;
+      const z = s.z + s.nz * side * offset;
+      const clear = samples.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 > clearance ** 2);
+      if (!clear) continue;
 
-  private addStreetLights(track: TrackDefinition): void {
-    const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x1c212b, roughness: 0.6 });
-    const lampMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffe9b8,
-      emissive: 0xffd888,
-      emissiveIntensity: 2.5,
-    });
-    const poleGeometry = new THREE.CylinderGeometry(0.12, 0.16, 7, 8);
-    const armGeometry = new THREE.BoxGeometry(0.15, 0.15, 2.4);
-    const lampGeometry = new THREE.BoxGeometry(0.5, 0.18, 0.9);
-
-    for (let distance = 20; distance < track.lengthMeters + 60; distance += 40) {
-      const side = (distance / 40) % 2 === 0 ? -1 : 1;
-      const x = side * (track.widthMeters / 2 + 1.6);
-      const pole = new THREE.Mesh(poleGeometry, poleMaterial);
-      pole.position.set(x, 3.5, -distance);
-      this.scene.add(pole);
-      const arm = new THREE.Mesh(armGeometry, poleMaterial);
-      arm.position.set(x - side * 1.1, 6.9, -distance);
-      arm.rotation.y = Math.PI / 2;
-      this.scene.add(arm);
-      const lamp = new THREE.Mesh(lampGeometry, lampMaterial);
-      lamp.position.set(x - side * 2.1, 6.8, -distance);
-      this.scene.add(lamp);
-
-      // Pool of light on the asphalt, faked with an additive gradient decal —
-      // real PointLights at every pole would blow the light budget.
-      const pool = new THREE.Mesh(
-        new THREE.PlaneGeometry(9, 9),
-        new THREE.MeshBasicMaterial({
-          map: lightPoolTexture(),
-          transparent: true,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          opacity: 0.35,
-        }),
+      const scale = 0.8 + random() * 1.5;
+      const tree = new THREE.Group();
+      const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+      trunk.position.y = 1.1;
+      const foliage = new THREE.Mesh(
+        foliageGeometry,
+        foliageMaterials[Math.floor(random() * foliageMaterials.length)]!,
       );
-      pool.rotation.x = -Math.PI / 2;
-      pool.position.set(x - side * 2.1, 0.015, -distance);
-      this.scene.add(pool);
+      foliage.position.y = 4.2;
+      tree.add(trunk, foliage);
+      tree.scale.setScalar(scale);
+      tree.position.set(x, 0, z);
+      this.scene.add(tree);
     }
   }
 
-  private addBuildings(track: TrackDefinition): void {
-    const random = seededRandom(track.id);
-    const windowTexture = buildWindowTexture(random);
-    for (let distance = -30; distance < track.lengthMeters + 80; distance += 18) {
-      for (const side of [-1, 1]) {
-        if (random() < 0.2) continue;
-        const buildingWidth = 10 + random() * 8;
-        const buildingHeight = 10 + random() * 30;
-        const buildingDepth = 12 + random() * 6;
-        const building = new THREE.Mesh(
-          new THREE.BoxGeometry(buildingWidth, buildingHeight, buildingDepth),
-          new THREE.MeshStandardMaterial({
-            color: new THREE.Color().setHSL(0.62, 0.15, 0.05 + random() * 0.05),
-            emissive: 0x2b3a55,
-            emissiveIntensity: 0.25,
-            emissiveMap: windowTexture,
-            roughness: 0.9,
-          }),
-        );
-        const x = side * (track.widthMeters / 2 + 14 + random() * 20);
-        building.position.set(x, buildingHeight / 2, -distance);
-        this.scene.add(building);
+  /** Tunnel sections: rock mound outside, concrete walls + lit ceiling inside. */
+  private addTunnels(track: TrackDefinition): void {
+    for (const tunnel of track.tunnels ?? []) {
+      const samples = this.pathModel!.sample(6, tunnel.startMeters, tunnel.endMeters);
+      const half = track.widthMeters / 2;
+
+      const concrete = new THREE.MeshStandardMaterial({
+        color: 0x2a2d33,
+        roughness: 0.9,
+        side: THREE.DoubleSide,
+      });
+      this.addWallRibbon(samples, -(half + 0.4), 0, 5, concrete);
+      this.addWallRibbon(samples, half + 0.4, 0, 5, concrete);
+      this.addRibbon(samples, 0, track.widthMeters + 1.4, concrete, 5);
+      // Continuous ceiling light strip, like the sodium lamps of the SP-160 tunnels.
+      this.addRibbon(samples, 0, 0.55, new THREE.MeshBasicMaterial({ color: 0xffe2a8 }), 4.85);
+
+      // The mountain the tunnel cuts through: chunky dark mounds over the roof.
+      const rock = new THREE.MeshStandardMaterial({ color: 0x101b10, roughness: 1 });
+      for (let i = 0; i < samples.length; i += 3) {
+        const s = samples[i]!;
+        const mound = new THREE.Mesh(new THREE.BoxGeometry(track.widthMeters + 14, 9, 22), rock);
+        mound.position.set(s.x, 5.5, s.z);
+        mound.rotation.y = -Math.atan2(s.nx, s.nz) + Math.PI / 2;
+        this.scene.add(mound);
       }
     }
   }
@@ -558,7 +639,7 @@ export class ThreeRaceRenderer implements RaceRenderer {
     ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
 
     // Fit the real track outline (any shape) into the circle.
-    const samples = this.pathModel!.sample(input.track.lengthMeters / 80);
+    const samples = this.pathModel!.sample(input.track.lengthMeters / 80, 0, input.track.lengthMeters);
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (const s of samples) {
       minX = Math.min(minX, s.x); maxX = Math.max(maxX, s.x);
@@ -743,7 +824,8 @@ function formatRaceTime(totalSeconds: number): string {
 
 // --- procedural textures ------------------------------------------------------
 
-function buildAsphaltTexture(widthMeters: number, lengthMeters: number): THREE.CanvasTexture {
+/** Repeating asphalt tile; ribbon UVs are already in 6m units, so repeat is (1,1). */
+function buildTiledAsphaltTexture(): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = 128;
   canvas.height = 128;
@@ -759,7 +841,6 @@ function buildAsphaltTexture(widthMeters: number, lengthMeters: number): THREE.C
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(widthMeters / 6, lengthMeters / 6);
   return texture;
 }
 

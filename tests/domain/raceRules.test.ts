@@ -6,6 +6,7 @@ import { createInitialCarRuntimeState } from "../../src/domain/car";
 const dragTrack: TrackDefinition = {
   id: "bandeirantita",
   description: "test drag",
+  scenery: "highway" as const,
   displayName: "Bandeirantita",
   raceType: "drag",
   lengthMeters: 400,
@@ -17,6 +18,7 @@ const dragTrack: TrackDefinition = {
 const circuitTrack: TrackDefinition = {
   id: "interlagos",
   description: "test circuit",
+  scenery: "city" as const,
   displayName: "Interlagos",
   raceType: "circuit",
   lengthMeters: 1000,

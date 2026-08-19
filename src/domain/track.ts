@@ -12,10 +12,19 @@ export interface Checkpoint {
   readonly distanceMeters: number;
 }
 
-/** Control point of a circuit's closed centerline, in meters on the ground plane. */
+/** Control point of a track's centerline, in meters on the ground plane. */
 export interface TrackPathPoint {
   readonly x: number;
   readonly z: number;
+}
+
+/** Surroundings the renderer builds along the track. */
+export type TrackScenery = "city" | "highway" | "serra";
+
+/** A tunnel section carved along the path (e.g. the Imigrantes serra tunnels). */
+export interface TrackTunnel {
+  readonly startMeters: number;
+  readonly endMeters: number;
 }
 
 export interface TrackDefinition {
@@ -32,12 +41,15 @@ export interface TrackDefinition {
   readonly checkpoints: readonly Checkpoint[];
   /** Half-width of the drivable path in meters, used for rendering and (later) collision. */
   readonly widthMeters: number;
+  readonly scenery: TrackScenery;
   /**
-   * Closed centerline control points for 'circuit' tracks (scaled by the
-   * renderer so the loop length equals lengthMeters). Absent for 'drag'
-   * tracks, whose path is a straight line.
+   * Centerline control points, scaled by the renderer so the path length
+   * equals lengthMeters. Closed loop for 'circuit' tracks; open polyline for
+   * curved 'drag' runs. Absent = a straight line.
    */
   readonly path?: readonly TrackPathPoint[];
+  /** Tunnel sections along the path (serra tracks). */
+  readonly tunnels?: readonly TrackTunnel[];
 }
 
 /** Per-player race progress, updated every tick from CarRuntimeState.distanceMeters. */

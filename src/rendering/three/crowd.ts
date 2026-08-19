@@ -118,11 +118,13 @@ function buildPerson(assets: SharedAssets, random: () => number): CrowdPerson {
 
 /**
  * Builds the crowd around the finish area: lines along both sides of the
- * strip from just before the line into the runoff, plus an arc behind the
- * end barrier — everyone facing the track.
+ * road from just before the line into the runoff — everyone facing the
+ * track. Positions come from the track's pose mapper, so the galleries
+ * follow curved roads too.
  */
 export function buildCrowd(
   random: () => number,
+  poseFn: (distanceMeters: number, lateralMeters: number) => { readonly x: number; readonly z: number },
   trackLengthMeters: number,
   trackWidthMeters: number,
   runoffMeters: number,
@@ -131,23 +133,22 @@ export function buildCrowd(
   const group = new THREE.Group();
   const people: CrowdPerson[] = [];
 
-  const addPerson = (x: number, distanceMeters: number, faceTowardsX: number): void => {
-    const person = buildPerson(assets, random);
-    person.group.position.set(x, 0, -distanceMeters);
-    person.group.rotation.y = Math.atan2(faceTowardsX - x, 0.0001) + (random() - 0.5) * 0.5;
-    group.add(person.group);
-    people.push(person);
-  };
-
-  // Everyone lines the SIDES of the strip (never behind the crash wall),
+  // Everyone lines the SIDES of the road (never behind the crash wall),
   // packed right behind the guard rails so the driver actually sees them:
   // galleries flanking the last stretch, the finish line and the runoff.
-  const sideX = trackWidthMeters / 2 + 1.6;
+  const sideLat = trackWidthMeters / 2 + 1.6;
   for (let i = 0; i < 72; i++) {
     const distance = trackLengthMeters - 50 + random() * (50 + runoffMeters - 6);
     const side = i % 2 === 0 ? -1 : 1;
-    const x = side * (sideX + random() * 3.2);
-    addPerson(x, distance, 0);
+    const spot = poseFn(distance, side * (sideLat + random() * 3.2));
+    const center = poseFn(distance, 0);
+
+    const person = buildPerson(assets, random);
+    person.group.position.set(spot.x, 0, spot.z);
+    person.group.rotation.y =
+      Math.atan2(center.x - spot.x, center.z - spot.z) + (random() - 0.5) * 0.5;
+    group.add(person.group);
+    people.push(person);
   }
 
   return { group, people };
