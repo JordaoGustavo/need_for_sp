@@ -224,7 +224,13 @@ export function createCarPreview(initialCar: CarDefinition, initialHost?: MiiLoo
 function looksEqual(a: MiiLook | null, b: MiiLook | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  return a.shirtColor === b.shirtColor && a.skinTone === b.skinTone && a.hairColor === b.hairColor;
+  return (
+    a.shirtColor === b.shirtColor &&
+    a.skinTone === b.skinTone &&
+    a.hairColor === b.hairColor &&
+    a.beardColor === b.beardColor &&
+    a.capColor === b.capColor
+  );
 }
 
 function easeInOutQuad(t: number): number {

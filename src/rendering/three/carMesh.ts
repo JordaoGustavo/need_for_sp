@@ -62,6 +62,17 @@ const BODY_SPECS: Record<BodyStyle, BodySpec> = {
     roof: { y: 1.05, z: 0.55, length: 0.7 },
     spoiler: { kind: "gt", wingY: 1.3, postY: 1.02, postHeight: 0.52 },
   },
+  wagon: {
+    // Long-roof station wagon (Opala Caravan): roof runs almost to the tail,
+    // near-vertical tailgate.
+    outline: [
+      [-2.05, 0.14], [-2.16, 0.33], [-2.06, 0.58], [-1.3, 0.72], [-0.85, 0.78],
+      [1.9, 0.84], [2.14, 0.82], [2.16, 0.58], [2.1, 0.3], [1.98, 0.14],
+    ],
+    glass: [[-0.8, 0.76], [-0.32, 1.18], [1.72, 1.16], [2.02, 0.84]],
+    roof: { y: 1.16, z: 0.7, length: 1.9 },
+    spoiler: { kind: "roof" },
+  },
 };
 
 export function buildCarMesh(visual: CarVisual): THREE.Group {

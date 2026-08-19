@@ -47,17 +47,17 @@ export function renderTrackSelectScreen(
   select(0);
 
   // Day/night period toggle.
-  let timeOfDay: TimeOfDay = "night";
+  let timeOfDay: TimeOfDay = "day";
   const periodRow = document.createElement("div");
   periodRow.className = "period-toggle";
   const periodLabel = document.createElement("span");
   periodLabel.className = "period-toggle-label";
   periodLabel.textContent = "Período:";
   const nightButton = document.createElement("button");
-  nightButton.className = "period-option selected";
+  nightButton.className = "period-option";
   nightButton.textContent = "🌙 Noite";
   const dayButton = document.createElement("button");
-  dayButton.className = "period-option";
+  dayButton.className = "period-option selected";
   dayButton.textContent = "☀️ Dia";
   const setPeriod = (period: TimeOfDay): void => {
     timeOfDay = period;

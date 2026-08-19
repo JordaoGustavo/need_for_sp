@@ -76,6 +76,8 @@ function avatarLook(youtuber: YoutuberProfile) {
     shirtColor: youtuber.avatar.shirtColor ?? youtuber.themeColor,
     skinTone: youtuber.avatar.skinTone,
     hairColor: youtuber.avatar.hairColor,
+    beardColor: youtuber.avatar.beardColor,
+    capColor: youtuber.avatar.capColor,
   };
 }
 

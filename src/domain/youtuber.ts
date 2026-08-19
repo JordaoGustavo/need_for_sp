@@ -13,6 +13,10 @@ export interface YoutuberAvatar {
   readonly hairColor: string;
   /** Shirt color; defaults to the youtuber's themeColor when omitted. */
   readonly shirtColor?: string;
+  /** Facial hair, when the youtuber wears one. */
+  readonly beardColor?: string;
+  /** Baseball cap, when the youtuber wears one. */
+  readonly capColor?: string;
 }
 
 export interface YoutuberProfile {

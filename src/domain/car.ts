@@ -43,9 +43,10 @@ export interface CarSoundProfile {
 /**
  * Which real-world silhouette the procedural mesh builder uses:
  * "coupe" = fastback coupe (Civic), "hatch" = boxy hot hatch (Golf),
- * "supra" = long-nosed GT with the tall hoop wing (Supra Mk4).
+ * "supra" = long-nosed GT with the tall hoop wing (Supra Mk4),
+ * "wagon" = long-roof station wagon (Opala Caravan).
  */
-export type BodyStyle = "coupe" | "hatch" | "supra";
+export type BodyStyle = "coupe" | "hatch" | "supra" | "wagon";
 
 export interface CarVisual {
   /** Base color, used by the default renderer (hex string, e.g. "#e63946"). */

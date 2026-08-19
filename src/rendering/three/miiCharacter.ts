@@ -13,6 +13,10 @@ export interface MiiLook {
   readonly shirtColor: string;
   readonly skinTone: string;
   readonly hairColor: string;
+  /** Facial hair, for youtubers who wear one. */
+  readonly beardColor?: string;
+  /** Baseball cap worn over the hair. */
+  readonly capColor?: string;
 }
 
 export interface MiiCharacter {
@@ -56,6 +60,33 @@ export function buildMiiCharacter(look: MiiLook): MiiCharacter {
   );
   hairCap.position.y = 1.48;
   group.add(hairCap);
+
+  // Real-life traits beyond the plain Wii look: cap and beard.
+  if (look.capColor) {
+    const capMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(look.capColor),
+      roughness: 0.85,
+    });
+    const crown = new THREE.Mesh(
+      new THREE.SphereGeometry(0.295, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.45),
+      capMaterial,
+    );
+    crown.position.y = 1.5;
+    group.add(crown);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.22), capMaterial);
+    brim.position.set(0, 1.58, -0.31);
+    brim.rotation.x = 0.12;
+    group.add(brim);
+  }
+  if (look.beardColor) {
+    const beard = new THREE.Mesh(
+      new THREE.SphereGeometry(0.14, 14, 10),
+      new THREE.MeshStandardMaterial({ color: new THREE.Color(look.beardColor), roughness: 0.9 }),
+    );
+    beard.scale.set(1.45, 0.75, 0.9);
+    beard.position.set(0, 1.33, -0.13);
+    group.add(beard);
+  }
 
   // Simple Mii eyes on the -Z (forward) face of the head.
   const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x1a1c22 });
