@@ -1,9 +1,10 @@
 import { defaultSignalingUrl } from "../config";
 import { hostRoom, joinRoom } from "../net/roomConnection";
-import { parseRoomCodeFromUrl, withTrackParam } from "../net/roomCode";
+import { parseRoomCodeFromUrl, withTimeOfDayParam, withTrackParam } from "../net/roomCode";
 import type { PeerConnection } from "../net/webrtcConnection";
 import type { CarDefinition } from "../domain/car";
 import type { TrackDefinition } from "../domain/track";
+import type { TimeOfDay } from "../rendering/renderer";
 import type { YoutuberProfile } from "../domain/youtuber";
 
 export interface RoomScreenResult {
@@ -22,6 +23,7 @@ export function renderRoomScreen(
   youtuber: YoutuberProfile,
   car: CarDefinition,
   track: TrackDefinition,
+  timeOfDay: TimeOfDay,
   onReady: (result: RoomScreenResult) => void,
   onBack: () => void,
 ): HTMLElement {
@@ -70,7 +72,7 @@ export function renderRoomScreen(
     // The chosen track rides in the invite URL so the guest loads the same map.
     const { roomCode, inviteUrl, peerConnectionPromise } = hostRoom(
       signalingUrl,
-      withTrackParam(window.location.href, track.id),
+      withTimeOfDayParam(withTrackParam(window.location.href, track.id), timeOfDay),
     );
 
     linkInput.value = inviteUrl;

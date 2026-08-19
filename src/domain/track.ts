@@ -41,6 +41,12 @@ export interface TrackDefinition {
   readonly checkpoints: readonly Checkpoint[];
   /** Half-width of the drivable path in meters, used for rendering and (later) collision. */
   readonly widthMeters: number;
+  /**
+   * Drivable run-off beyond the asphalt on each side, in meters (kerbs +
+   * grass). Cars may use it — kerbs are free, grass scrubs speed — before
+   * hitting the real barrier. 0/absent = walls right at the asphalt edge.
+   */
+  readonly runoffMeters?: number;
   readonly scenery: TrackScenery;
   /**
    * Centerline control points, scaled by the renderer so the path length

@@ -69,25 +69,43 @@ export function stepCarPhysics(
   };
 }
 
+/** Kerb width beyond the asphalt that can be used penalty-free, in meters. */
+const KERB_FREE_METERS = 1.5;
+/** Speed scrubbed while running on the grass run-off, in km/h per second. */
+const GRASS_DRAG_KMH_PER_SEC = 42;
+
 /**
- * Collides the car with the track's side barriers: the lateral offset is clamped
- * so the car body stays on the road, and grinding against the wall scrubs speed.
- * Pure, like stepCarPhysics. Returns the same state object if nothing hit.
+ * Collides the car with the track's side limits. With `runoffExtraMeters` the
+ * asphalt is not a wall: kerbs (first KERB_FREE_METERS) can be abused freely,
+ * the grass beyond drags speed down, and only the barrier at the end of the
+ * run-off is a hard clamp that grinds speed off. Pure, like stepCarPhysics.
  */
 export function applyTrackBoundaryCollision(
   state: CarRuntimeState,
   trackWidthMeters: number,
   dtSeconds: number,
+  runoffExtraMeters = 0,
 ): CarRuntimeState {
-  const maxLateral = trackWidthMeters / 2 - CAR_WIDTH_METERS / 2;
-  if (Math.abs(state.lateralOffsetMeters) <= maxLateral) return state;
+  const asphaltHalf = trackWidthMeters / 2;
+  const maxLateral = asphaltHalf + runoffExtraMeters - CAR_WIDTH_METERS / 2;
+  const absLateral = Math.abs(state.lateralOffsetMeters);
 
-  const scrubbed = Math.max(0, Math.abs(state.speedKmh) - WALL_SCRUB_KMH_PER_SEC * dtSeconds);
-  return {
-    ...state,
-    lateralOffsetMeters: Math.sign(state.lateralOffsetMeters) * maxLateral,
-    speedKmh: Math.sign(state.speedKmh) * scrubbed,
-  };
+  if (absLateral > maxLateral) {
+    const scrubbed = Math.max(0, Math.abs(state.speedKmh) - WALL_SCRUB_KMH_PER_SEC * dtSeconds);
+    return {
+      ...state,
+      lateralOffsetMeters: Math.sign(state.lateralOffsetMeters) * maxLateral,
+      speedKmh: Math.sign(state.speedKmh) * scrubbed,
+    };
+  }
+
+  // On the grass (past the free kerb strip): the run-off punishes, gently.
+  if (runoffExtraMeters > 0 && absLateral > asphaltHalf - CAR_WIDTH_METERS / 2 + KERB_FREE_METERS) {
+    const dragged = Math.max(0, Math.abs(state.speedKmh) - GRASS_DRAG_KMH_PER_SEC * dtSeconds);
+    return { ...state, speedKmh: Math.sign(state.speedKmh) * dragged };
+  }
+
+  return state;
 }
 
 /** How much speed survives (reversed) when crashing into an end wall. */

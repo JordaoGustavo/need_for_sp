@@ -325,6 +325,47 @@ body {
   color: var(--text-dim);
 }
 
+.period-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 6px 0 60px;
+  z-index: 1;
+}
+
+.period-toggle-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+}
+
+.period-option {
+  padding: 7px 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(24, 27, 34, 0.8);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-style: italic;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.period-option:hover {
+  color: var(--text);
+}
+
+.period-option.selected {
+  color: var(--neon);
+  border-color: var(--neon);
+  box-shadow: 0 0 14px rgba(184, 255, 31, 0.25);
+}
+
 .nfsu-pill-stack {
   position: absolute;
   right: 40px;

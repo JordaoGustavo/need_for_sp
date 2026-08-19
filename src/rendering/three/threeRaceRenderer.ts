@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import type { RaceRenderInput, RaceRenderer, RenderedCar } from "../renderer";
+import type { RaceRenderInput, RaceRenderer, RenderedCar, TimeOfDay } from "../renderer";
 import type { TrackDefinition } from "../../domain/track";
 import { applyCarEnvironmentMap, buildCarMesh, disposeCarMesh } from "./carMesh";
 import { animateCrowd, buildCrowd, sendCrowdToCar, type CrowdPerson } from "./crowd";
@@ -35,7 +35,10 @@ export class ThreeRaceRenderer implements RaceRenderer {
   private carMeshes: { carId: string; mesh: THREE.Group }[] = [];
   private disposed = false;
 
-  constructor(private readonly container: HTMLElement) {
+  constructor(
+    private readonly container: HTMLElement,
+    private readonly timeOfDay: TimeOfDay = "night",
+  ) {
     this.webgl = new THREE.WebGLRenderer({ antialias: true });
     this.webgl.domElement.className = "race-canvas-3d";
     container.appendChild(this.webgl.domElement);
@@ -56,10 +59,17 @@ export class ThreeRaceRenderer implements RaceRenderer {
     this.carEnvMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
 
-    this.scene.add(new THREE.HemisphereLight(0x2a3550, 0x0a0c12, 0.9));
-    const moon = new THREE.DirectionalLight(0x8fa8ff, 0.7);
-    moon.position.set(40, 80, -30);
-    this.scene.add(moon);
+    if (this.timeOfDay === "day") {
+      this.scene.add(new THREE.HemisphereLight(0xbfd9ff, 0x5c6a4a, 1.15));
+      const sun = new THREE.DirectionalLight(0xfff2d8, 2.0);
+      sun.position.set(80, 140, 60);
+      this.scene.add(sun);
+    } else {
+      this.scene.add(new THREE.HemisphereLight(0x2a3550, 0x0a0c12, 0.9));
+      const moon = new THREE.DirectionalLight(0x8fa8ff, 0.7);
+      moon.position.set(40, 80, -30);
+      this.scene.add(moon);
+    }
   }
 
   resize(width: number, height: number): void {
@@ -132,8 +142,11 @@ export class ThreeRaceRenderer implements RaceRenderer {
     });
     this.addRibbon(samples, 0, track.widthMeters, asphalt, 0, true);
     const half = track.widthMeters / 2;
-    this.addRibbon(samples, -(half - 0.25), 0.3, new THREE.MeshBasicMaterial({ color: 0xf2d200 }), 0.012);
-    this.addRibbon(samples, half - 0.25, 0.3, new THREE.MeshBasicMaterial({ color: 0xff5a1f }), 0.012);
+    // Race tracks use white boundary lines; highways keep yellow/orange.
+    const [leftLine, rightLine] =
+      track.scenery === "autodromo" ? [0xf2f3f5, 0xf2f3f5] : [0xf2d200, 0xff5a1f];
+    this.addRibbon(samples, -(half - 0.25), 0.3, new THREE.MeshBasicMaterial({ color: leftLine }), 0.012);
+    this.addRibbon(samples, half - 0.25, 0.3, new THREE.MeshBasicMaterial({ color: rightLine }), 0.012);
     this.addCenterDashes(track, from + 8, to - 8);
 
     if (isCircuit) {
@@ -165,26 +178,35 @@ export class ThreeRaceRenderer implements RaceRenderer {
       }
     }
 
-    this.addStreetLights(track, from, to);
+    // Race tracks have floodlight towers, not street poles.
+    if (track.scenery !== "autodromo") {
+      this.addStreetLights(track, from, to);
+    }
     this.addScenery(track, samples);
     this.addTunnels(track);
   }
 
-  /** Night mood per scenery: city glow, open highway, or serra fog over the mata. */
+  /** Sky/fog per scenery AND time of day: city glow, open highway, serra mist. */
   private applySceneryAtmosphere(track: TrackDefinition): void {
+    const day = this.timeOfDay === "day";
+    let sky: number;
+    let near: number;
+    let far: number;
     switch (track.scenery) {
       case "serra":
-        this.scene.background = new THREE.Color(0x04100a);
-        this.scene.fog = new THREE.Fog(0x04100a, 40, 230);
-        return;
+        [sky, near, far] = day ? [0xa8c6b3, 90, 520] : [0x04100a, 40, 230];
+        break;
       case "highway":
-        this.scene.background = new THREE.Color(0x05070d);
-        this.scene.fog = new THREE.Fog(0x05070d, 70, 380);
-        return;
+        [sky, near, far] = day ? [0x9fc0e0, 160, 950] : [0x05070d, 70, 380];
+        break;
+      case "autodromo":
+        [sky, near, far] = day ? [0x9fc4e8, 220, 1200] : [0x05070f, 70, 380];
+        break;
       default:
-        this.scene.background = new THREE.Color(0x05070f);
-        this.scene.fog = new THREE.Fog(0x05070f, 60, 320);
+        [sky, near, far] = day ? [0x9fc0e0, 150, 900] : [0x05070f, 60, 320];
     }
+    this.scene.background = new THREE.Color(sky);
+    this.scene.fog = new THREE.Fog(sky, near, far);
   }
 
   private addGround(track: TrackDefinition, samples: readonly TrackSample[]): void {
@@ -194,14 +216,23 @@ export class ThreeRaceRenderer implements RaceRenderer {
       minZ = Math.min(minZ, s.z); maxZ = Math.max(maxZ, s.z);
     }
     const margin = 320;
+    const day = this.timeOfDay === "day";
     const color =
       track.scenery === "serra"
-        ? 0x08130a
+        ? day
+          ? 0x2e5c26
+          : 0x08130a
         : track.scenery === "highway"
-          ? 0x0b100c
+          ? day
+            ? 0x55663f
+            : 0x0b100c
           : track.scenery === "autodromo"
-            ? 0x0b1707 // Interlagos grass
-            : 0x0a0d13;
+            ? day
+              ? 0x3f7a2e // Interlagos daytime grass
+              : 0x101f0a
+            : day
+              ? 0x3c4046
+              : 0x0a0d13;
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(maxX - minX + margin * 2, maxZ - minZ + margin * 2),
       new THREE.MeshStandardMaterial({ color, roughness: 1 }),
@@ -404,20 +435,22 @@ export class ThreeRaceRenderer implements RaceRenderer {
       anchor.add(lamp);
 
       // Pool of light on the asphalt, faked with an additive gradient decal —
-      // real PointLights at every pole would blow the light budget.
-      const pool = new THREE.Mesh(
-        new THREE.PlaneGeometry(9, 9),
-        new THREE.MeshBasicMaterial({
-          map: lightPoolTexture(),
-          transparent: true,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          opacity: 0.35,
-        }),
-      );
-      pool.rotation.x = -Math.PI / 2;
-      pool.position.set(-side * 2.1, 0.015, 0);
-      anchor.add(pool);
+      // real PointLights at every pole would blow the light budget. Night only.
+      if (this.timeOfDay === "night") {
+        const pool = new THREE.Mesh(
+          new THREE.PlaneGeometry(9, 9),
+          new THREE.MeshBasicMaterial({
+            map: lightPoolTexture(),
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            opacity: 0.35,
+          }),
+        );
+        pool.rotation.x = -Math.PI / 2;
+        pool.position.set(-side * 2.1, 0.015, 0);
+        anchor.add(pool);
+      }
     }
   }
 
@@ -459,77 +492,114 @@ export class ThreeRaceRenderer implements RaceRenderer {
     random: () => number,
   ): void {
     const half = track.widthMeters / 2;
+    const day = this.timeOfDay === "day";
+    const runoff = track.runoffMeters ?? 6;
 
-    // Lighter mowed-grass verge hugging the asphalt.
-    const verge = new THREE.MeshStandardMaterial({ color: 0x14260c, roughness: 1 });
-    this.addRibbon(samples, -(half + 2.6), 5, verge, 0.005);
-    this.addRibbon(samples, half + 2.6, 5, verge, 0.005);
+    // The iconic green-painted run-off apron on both sides — fully drivable
+    // (kerbs are free, the physics drags speed only past the kerb strip).
+    const apron = new THREE.MeshStandardMaterial({
+      color: day ? 0x2f9e50 : 0x155c2e,
+      roughness: 0.95,
+    });
+    this.addRibbon(samples, -(half + runoff / 2), runoff, apron, 0.006);
+    this.addRibbon(samples, half + runoff / 2, runoff, apron, 0.006);
 
     // Kerbs (zebras) wherever the track actually bends.
     this.addKerbs(track, samples);
 
-    // Low white perimeter walls, like the concrete walls around Interlagos.
+    // Green perimeter walls right past the run-off (sponsor-green, Interlagos style).
     const wallMaterial = new THREE.MeshStandardMaterial({
-      color: 0xd8dde2,
+      color: day ? 0x1f8f4a : 0x11552c,
       roughness: 0.8,
       side: THREE.DoubleSide,
     });
-    this.addWallRibbon(samples, -(half + 8), 0, 1, wallMaterial);
-    this.addWallRibbon(samples, half + 8, 0, 1, wallMaterial);
+    this.addWallRibbon(samples, -(half + runoff + 1.2), 0, 1.1, wallMaterial);
+    this.addWallRibbon(samples, half + runoff + 1.2, 0, 1.1, wallMaterial);
 
     // Main straight: grandstands on the outside, pit building on the inside.
-    const standMaterial = new THREE.MeshStandardMaterial({ color: 0x39414d, roughness: 0.8 });
+    const standMaterial = new THREE.MeshStandardMaterial({ color: day ? 0x8f979f : 0x39414d, roughness: 0.8 });
     const seatsMaterial = new THREE.MeshStandardMaterial({
       color: 0x2b6cb0,
       emissive: 0x1a4a80,
-      emissiveIntensity: 0.25,
+      emissiveIntensity: day ? 0.05 : 0.25,
       roughness: 0.9,
     });
     for (let d = -80; d <= 100; d += 46) {
       const anchor = this.anchorAt(d);
       const base = new THREE.Mesh(new THREE.BoxGeometry(10, 7, 40), standMaterial);
-      base.position.set(-(half + 16), 3.5, 0);
+      base.position.set(-(half + runoff + 10), 3.5, 0);
       base.rotation.z = 0.32;
       anchor.add(base);
       const seats = new THREE.Mesh(new THREE.BoxGeometry(10.2, 1.2, 40.2), seatsMaterial);
-      seats.position.set(-(half + 16), 7.2, 0);
+      seats.position.set(-(half + runoff + 10), 7.2, 0);
       seats.rotation.z = 0.32;
       anchor.add(seats);
     }
     const pitAnchor = this.anchorAt(20);
     const pits = new THREE.Mesh(new THREE.BoxGeometry(9, 6, 120), standMaterial);
-    pits.position.set(half + 14, 3, 0);
+    pits.position.set(half + runoff + 8, 3, 0);
     pitAnchor.add(pits);
     const pitGlass = new THREE.Mesh(
       new THREE.BoxGeometry(0.3, 2.2, 118),
-      new THREE.MeshStandardMaterial({ color: 0xbfd9ee, emissive: 0x9fc6ff, emissiveIntensity: 0.6 }),
+      new THREE.MeshStandardMaterial({
+        color: 0xbfd9ee,
+        emissive: 0x9fc6ff,
+        emissiveIntensity: day ? 0.1 : 0.6,
+      }),
     );
-    pitGlass.position.set(half + 9.6, 3.4, 0);
+    pitGlass.position.set(half + runoff + 3.6, 3.4, 0);
     pitAnchor.add(pitGlass);
 
-    // Floodlight towers around the lap.
-    const towerMaterial = new THREE.MeshStandardMaterial({ color: 0x1c212b, roughness: 0.6 });
+    // Floodlight towers around the lap (lit only at night).
+    const towerMaterial = new THREE.MeshStandardMaterial({ color: 0x666c76, roughness: 0.6 });
     const headMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: 0xfff2cc,
-      emissiveIntensity: 3,
+      emissiveIntensity: day ? 0.1 : 3,
     });
     for (let d = 0; d < track.lengthMeters; d += Math.round(track.lengthMeters / 6)) {
       const side = random() < 0.5 ? -1 : 1;
-      const pose = this.pathModel!.pose(d, side * (half + 10));
+      const pose = this.pathModel!.pose(d, side * (half + runoff + 3));
       const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 16, 8), towerMaterial);
       tower.position.set(pose.x, 8, pose.z);
       this.scene.add(tower);
       const head = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1, 0.5), headMaterial);
       head.position.set(pose.x, 16.4, pose.z);
       this.scene.add(head);
-      const glow = new THREE.PointLight(0xfff0cc, 70, 90, 1.7);
-      glow.position.set(pose.x, 15, pose.z);
-      this.scene.add(glow);
+      if (!day) {
+        const glow = new THREE.PointLight(0xfff0cc, 70, 90, 1.7);
+        glow.position.set(pose.x, 15, pose.z);
+        this.scene.add(glow);
+      }
     }
 
-    // The city of São Paulo pressing around the autodrome, further out.
-    this.addCityBuildings(track, samples, random, 18);
+    // Trees inside/around the grounds (Interlagos is full of them)...
+    this.addTrees(track, samples, random, 40, runoff + 16, runoff + 90);
+
+    // ...and the low-rise neighborhood far outside the fences, never on the grounds.
+    const windowTexture = buildWindowTexture(random);
+    for (let i = 0; i < 30; i++) {
+      const anchor = samples[Math.floor(random() * samples.length)]!;
+      const side = random() < 0.5 ? -1 : 1;
+      const offset = 150 + random() * 160;
+      const x = anchor.x + anchor.nx * side * offset;
+      const z = anchor.z + anchor.nz * side * offset;
+      const clear = samples.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 > 140 ** 2);
+      if (!clear) continue;
+      const h = 5 + random() * 10;
+      const house = new THREE.Mesh(
+        new THREE.BoxGeometry(10 + random() * 10, h, 10 + random() * 10),
+        new THREE.MeshStandardMaterial({
+          color: new THREE.Color().setHSL(0.07, 0.25, day ? 0.45 : 0.09),
+          emissive: 0x2b3a55,
+          emissiveIntensity: day ? 0 : 0.2,
+          emissiveMap: windowTexture,
+          roughness: 0.9,
+        }),
+      );
+      house.position.set(x, h / 2, z);
+      this.scene.add(house);
+    }
   }
 
   /** Red/white kerb ribbons along every bent section of the lap. */
@@ -954,20 +1024,39 @@ function formatRaceTime(totalSeconds: number): string {
 
 // --- procedural textures ------------------------------------------------------
 
-/** Repeating asphalt tile; ribbon UVs are already in 6m units, so repeat is (1,1). */
+/**
+ * Repeating asphalt tile (ribbon UVs are in 6m units, repeat = 1,1): smooth
+ * dark racing tarmac — fine low-contrast aggregate, faint longitudinal wear
+ * bands and darker tire lines instead of the old starry speckle.
+ */
 function buildTiledAsphaltTexture(): THREE.CanvasTexture {
+  const size = 128;
   const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 128;
+  canvas.width = size;
+  canvas.height = size;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#191d24";
-  ctx.fillRect(0, 0, 128, 128);
+  ctx.fillStyle = "#26292e";
+  ctx.fillRect(0, 0, size, size);
+
   const random = seededRandom("asphalt");
-  for (let i = 0; i < 500; i++) {
-    const shade = 20 + Math.floor(random() * 25);
-    ctx.fillStyle = `rgb(${shade},${shade + 2},${shade + 6})`;
-    ctx.fillRect(random() * 128, random() * 128, 1.5, 1.5);
+  // Longitudinal wear: subtle vertical bands (v runs along the track).
+  for (let x = 0; x < size; x += 2) {
+    const wear = 0.06 * Math.sin((x / size) * Math.PI * 2) + (random() - 0.5) * 0.04;
+    ctx.fillStyle = wear > 0 ? `rgba(255,255,255,${wear * 0.5})` : `rgba(0,0,0,${-wear})`;
+    ctx.fillRect(x, 0, 2, size);
   }
+  // Fine aggregate, barely visible.
+  for (let i = 0; i < 900; i++) {
+    const shade = 34 + Math.floor(random() * 14);
+    ctx.fillStyle = `rgba(${shade},${shade + 2},${shade + 5},0.5)`;
+    ctx.fillRect(random() * size, random() * size, 1, 1);
+  }
+  // Darker rubbered-in tire lines either side of center.
+  ctx.fillStyle = "rgba(0,0,0,0.16)";
+  for (const band of [0.24, 0.68]) {
+    ctx.fillRect(size * band, 0, size * 0.09, size);
+  }
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;

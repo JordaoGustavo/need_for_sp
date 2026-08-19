@@ -135,7 +135,12 @@ export class RaceSession {
       if (this.config.peer) {
         this.localState = resolveCarCollision(this.localState, this.interpolatedRemoteState());
       }
-      this.localState = applyTrackBoundaryCollision(this.localState, this.config.track.widthMeters, dtSeconds);
+      this.localState = applyTrackBoundaryCollision(
+        this.localState,
+        this.config.track.widthMeters,
+        dtSeconds,
+        this.config.track.runoffMeters ?? 0,
+      );
       if (this.config.track.raceType === "drag") {
         this.localState = applyTrackLimits(this.localState, this.config.track.lengthMeters);
       }
@@ -180,7 +185,12 @@ export class RaceSession {
         dtSeconds,
         this.curvatureAt(this.localState.distanceMeters),
       );
-      this.localState = applyTrackBoundaryCollision(this.localState, this.config.track.widthMeters, dtSeconds);
+      this.localState = applyTrackBoundaryCollision(
+        this.localState,
+        this.config.track.widthMeters,
+        dtSeconds,
+        this.config.track.runoffMeters ?? 0,
+      );
       if (this.config.track.raceType === "drag") {
         this.localState = applyTrackLimits(this.localState, this.config.track.lengthMeters);
       }

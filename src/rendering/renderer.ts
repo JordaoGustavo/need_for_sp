@@ -2,6 +2,9 @@ import type { CarDefinition, CarRuntimeState } from "../domain/car";
 import type { HudSkin, HudState } from "../domain/hud";
 import type { TrackDefinition } from "../domain/track";
 
+/** Lighting/palette preset for the race scene. */
+export type TimeOfDay = "day" | "night";
+
 export interface RenderedCar {
   readonly definition: CarDefinition;
   readonly state: CarRuntimeState;

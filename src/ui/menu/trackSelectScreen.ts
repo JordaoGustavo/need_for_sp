@@ -1,16 +1,18 @@
 import type { TrackDefinition } from "../../domain/track";
 import { TRACKS } from "../../content/tracks";
 import { createTrackPathModel } from "../../rendering/three/trackPath";
+import type { TimeOfDay } from "../../rendering/renderer";
 import { playBack, playConfirm, playHover, playSelect } from "../../audio/uiSounds";
 import { attachMenuKeyboard, buildMenuHeader, buildPillButton } from "./nfsuMenuChrome";
 
 /**
  * Track select, NFSU2-style: one card per track from the content registry,
  * each with its outline drawn from the same path model the renderer uses,
- * plus type/length/laps. ◄ ► keyboard navigation, Enter confirms.
+ * plus type/length/laps and a day/night period toggle. ◄ ► keyboard
+ * navigation, Enter confirms.
  */
 export function renderTrackSelectScreen(
-  onSelect: (track: TrackDefinition) => void,
+  onSelect: (track: TrackDefinition, timeOfDay: TimeOfDay) => void,
   onBack: () => void,
 ): HTMLElement {
   const root = document.createElement("div");
@@ -44,11 +46,39 @@ export function renderTrackSelectScreen(
   }
   select(0);
 
+  // Day/night period toggle.
+  let timeOfDay: TimeOfDay = "night";
+  const periodRow = document.createElement("div");
+  periodRow.className = "period-toggle";
+  const periodLabel = document.createElement("span");
+  periodLabel.className = "period-toggle-label";
+  periodLabel.textContent = "Período:";
+  const nightButton = document.createElement("button");
+  nightButton.className = "period-option selected";
+  nightButton.textContent = "🌙 Noite";
+  const dayButton = document.createElement("button");
+  dayButton.className = "period-option";
+  dayButton.textContent = "☀️ Dia";
+  const setPeriod = (period: TimeOfDay): void => {
+    timeOfDay = period;
+    nightButton.classList.toggle("selected", period === "night");
+    dayButton.classList.toggle("selected", period === "day");
+  };
+  nightButton.addEventListener("click", () => {
+    playSelect();
+    setPeriod("night");
+  });
+  dayButton.addEventListener("click", () => {
+    playSelect();
+    setPeriod("day");
+  });
+  periodRow.append(periodLabel, nightButton, dayButton);
+
   const pills = document.createElement("div");
   pills.className = "nfsu-pill-stack";
   const confirm = (): void => {
     playConfirm();
-    onSelect(selected);
+    onSelect(selected, timeOfDay);
   };
   const back = (): void => {
     playBack();
@@ -56,7 +86,7 @@ export function renderTrackSelectScreen(
   };
   pills.append(buildPillButton("Continuar", confirm), buildPillButton("Voltar", back));
 
-  root.append(buildMenuHeader("Seleção de Pista"), grid, pills);
+  root.append(buildMenuHeader("Seleção de Pista"), grid, periodRow, pills);
 
   const detachKeyboard = attachMenuKeyboard({
     onLeft: () => {

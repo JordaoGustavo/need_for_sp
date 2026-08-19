@@ -42,3 +42,16 @@ export function withTrackParam(url: string, trackId: string): string {
 export function parseTrackIdFromUrl(url: string): string | null {
   return new URL(url).searchParams.get(TRACK_QUERY_PARAM);
 }
+
+/** Host's day/night choice, also carried by the invite URL. */
+export const TIME_OF_DAY_QUERY_PARAM = "tod";
+
+export function withTimeOfDayParam(url: string, timeOfDay: string): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set(TIME_OF_DAY_QUERY_PARAM, timeOfDay);
+  return parsed.toString();
+}
+
+export function parseTimeOfDayFromUrl(url: string): "day" | "night" {
+  return new URL(url).searchParams.get(TIME_OF_DAY_QUERY_PARAM) === "day" ? "day" : "night";
+}

@@ -26,6 +26,8 @@ export const INTERLAGOS: TrackDefinition = {
   // Real Interlagos runs 12-15m wide; grandstands, pit boxes, kerbs and grass
   // verges come from the "autodromo" scenery.
   widthMeters: 13,
+  // Kerbs + green-painted grass run-off usable on both sides before the wall.
+  runoffMeters: 6,
   scenery: "autodromo",
   path: [
     // Reta dos Boxes (start/finish), heading "west" along the top

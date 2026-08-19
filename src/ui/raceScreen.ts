@@ -10,11 +10,12 @@ import { RaceSession } from "../game/raceSession";
 import { ThreeRaceRenderer } from "../rendering/three/threeRaceRenderer";
 import { createTrackPathModel } from "../rendering/three/trackPath";
 import { NfsuClusterHudSkin } from "../rendering/hudSkins/nfsuClusterHudSkin";
-import type { RenderedCar } from "../rendering/renderer";
+import type { RenderedCar, TimeOfDay } from "../rendering/renderer";
 import type { PeerConnection } from "../net/webrtcConnection";
 
 export interface RaceScreenConfig {
   readonly track: TrackDefinition;
+  readonly timeOfDay: TimeOfDay;
   readonly localCar: CarDefinition;
   readonly remoteCarFallback: CarDefinition;
   readonly localPlayerId: string;
@@ -30,7 +31,7 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
   const root = document.createElement("div");
   root.className = "screen race-screen";
 
-  const renderer = new ThreeRaceRenderer(root);
+  const renderer = new ThreeRaceRenderer(root, config.timeOfDay);
 
   const localEngine = new EngineSound(config.localCar.sound);
   const tireSqueal = new TireSquealSound();
