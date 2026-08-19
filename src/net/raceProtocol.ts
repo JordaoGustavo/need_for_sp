@@ -8,7 +8,8 @@ export type RaceMessage =
   | { type: "hello"; carId: string }
   | { type: "carState"; state: CarRuntimeState; raceTimeSeconds: number }
   | { type: "raceStart"; startAtEpochMs: number }
-  | { type: "raceFinished"; winnerId: string; finishTimeSeconds: number };
+  | { type: "raceFinished"; winnerId: string; finishTimeSeconds: number }
+  | { type: "engineBlown"; playerId: string };
 
 export function encodeRaceMessage(message: RaceMessage): string {
   return JSON.stringify(message);

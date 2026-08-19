@@ -12,6 +12,11 @@ export interface HudState {
   /** Start of the red zone on the dial. */
   readonly redlineRpm: number;
   readonly gear: number;
+  /** NOS bottle left (0..1) — one charge per race, never refills. */
+  readonly nitroRemaining: number;
+  /** Engine heat from continuous NOS use (0..1); at 1 the engine blows. */
+  readonly nitroHeat: number;
+  readonly nitroActive: boolean;
 }
 
 export interface HudSkin {

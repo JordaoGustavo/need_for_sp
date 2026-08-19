@@ -22,6 +22,16 @@ const RPM_NEEDLE_RATE_PER_SEC = 9000;
  */
 const LIMITER_CUT_DROP_RPM = 850;
 
+/** One NOS bottle per race: total seconds of boost, never refilled. */
+const NITRO_BOTTLE_SECONDS = 6;
+/** Holding the boost this long CONTINUOUSLY blows the engine. Pulse it. */
+const NITRO_BLOW_SECONDS = 3.2;
+/** Seconds for a fully-heated engine to cool back down when off the button. */
+const NITRO_COOL_SECONDS = 2.8;
+/** Extra shove while spraying, in km/h per second, plus a top-speed bump. */
+const NITRO_EXTRA_ACCEL_KMH_PER_SEC = 26;
+const NITRO_TOP_SPEED_FACTOR = 1.08;
+
 export interface RaceSessionConfig {
   readonly track: TrackDefinition;
   readonly localCar: CarDefinition;
@@ -52,6 +62,13 @@ export interface RaceSessionSnapshot {
   readonly localFinishTimeSeconds: number | null;
   /** true on the exact frames the rev limiter cut ignition (revving at redline). */
   readonly limiterCutTriggered: boolean;
+  /** NOS bottle left (0..1). */
+  readonly nitroRemaining: number;
+  /** Engine heat from continuous NOS (0..1); 1 = blown. */
+  readonly nitroHeat: number;
+  readonly nitroActive: boolean;
+  /** true once the engine blew from NOS abuse — the race is lost. */
+  readonly engineBlown: boolean;
 }
 
 /**
@@ -81,6 +98,10 @@ export class RaceSession {
   private finished = false;
   private winnerId: string | null = null;
   private displayedRpm: number;
+  private nitroRemaining = 1;
+  private nitroHeat = 0;
+  private nitroActiveThisFrame = false;
+  private engineBlown = false;
 
   constructor(private readonly config: RaceSessionConfig) {
     this.rules = createRaceRules(config.track);
@@ -124,9 +145,33 @@ export class RaceSession {
 
     if (racing && !this.finished) {
       this.raceTimeSeconds += dtSeconds;
+
+      // NOS: one bottle, no refills; continuous abuse overheats and blows
+      // the engine — pulse the button instead of holding it.
+      this.nitroActiveThisFrame =
+        input.nitro === true && input.throttle && this.nitroRemaining > 0 && !this.engineBlown;
+      if (this.nitroActiveThisFrame) {
+        this.nitroRemaining = Math.max(0, this.nitroRemaining - dtSeconds / NITRO_BOTTLE_SECONDS);
+        this.nitroHeat += dtSeconds / NITRO_BLOW_SECONDS;
+        if (this.nitroHeat >= 1) {
+          this.blowEngine();
+        }
+      } else {
+        this.nitroHeat = Math.max(0, this.nitroHeat - dtSeconds / NITRO_COOL_SECONDS);
+      }
+
+      const baseStats = this.config.localCar.stats;
+      const effectiveStats = this.nitroActiveThisFrame
+        ? {
+            ...baseStats,
+            accelerationKmhPerSec: baseStats.accelerationKmhPerSec + NITRO_EXTRA_ACCEL_KMH_PER_SEC,
+            topSpeedKmh: baseStats.topSpeedKmh * NITRO_TOP_SPEED_FACTOR,
+          }
+        : baseStats;
+
       this.localState = stepCarPhysics(
         this.localState,
-        this.config.localCar.stats,
+        effectiveStats,
         input,
         dtSeconds,
         this.curvatureAt(this.localState.distanceMeters),
@@ -228,6 +273,10 @@ export class RaceSession {
       raceTimeSeconds: this.raceTimeSeconds,
       localFinishTimeSeconds: this.localProgress.finishTimeSeconds,
       limiterCutTriggered: limiterCut,
+      nitroRemaining: this.nitroRemaining,
+      nitroHeat: this.nitroHeat,
+      nitroActive: this.nitroActiveThisFrame,
+      engineBlown: this.engineBlown,
     };
   }
 
@@ -257,6 +306,9 @@ export class RaceSession {
       targetRpm = engine.redlineRpm;
     }
 
+    // A blown engine winds down to zero and stays dead.
+    if (this.engineBlown) targetRpm = 0;
+
     const maxStep = RPM_NEEDLE_RATE_PER_SEC * dtSeconds;
     this.displayedRpm += Math.max(-maxStep, Math.min(maxStep, targetRpm - this.displayedRpm));
 
@@ -268,7 +320,16 @@ export class RaceSession {
       limiterCut = true;
     }
 
-    return { hud: { ...base, rpm: this.displayedRpm }, limiterCut };
+    return {
+      hud: {
+        ...base,
+        rpm: this.displayedRpm,
+        nitroRemaining: this.nitroRemaining,
+        nitroHeat: this.nitroHeat,
+        nitroActive: this.nitroActiveThisFrame,
+      },
+      limiterCut,
+    };
   }
 
   private interpolatedRemoteState(): CarRuntimeState {
@@ -288,6 +349,26 @@ export class RaceSession {
       speedKmh: lerp(previous.state.speedKmh, latest.state.speedKmh, factor),
       headingRad: lerp(previous.state.headingRad, latest.state.headingRad, factor),
     };
+  }
+
+  /**
+   * NOS abuse: the engine lets go. The race ends immediately and the OTHER
+   * player wins (solo: you simply lose). The car coasts out via the finished
+   * roll-down path.
+   */
+  private blowEngine(): void {
+    if (this.engineBlown) return;
+    this.engineBlown = true;
+    this.finished = true;
+    this.winnerId = this.config.remotePlayerId;
+    this.send({ type: "engineBlown", playerId: this.config.localPlayerId });
+    if (this.config.isHost) {
+      this.send({
+        type: "raceFinished",
+        winnerId: this.config.remotePlayerId,
+        finishTimeSeconds: this.raceTimeSeconds,
+      });
+    }
   }
 
   private curvatureAt(distanceMeters: number): number {
@@ -344,6 +425,19 @@ export class RaceSession {
       case "raceFinished":
         this.finished = true;
         this.winnerId = message.winnerId;
+        return;
+      case "engineBlown":
+        // The other player's engine let go — race over, we win. The host also
+        // broadcasts the authoritative result.
+        this.finished = true;
+        this.winnerId = this.config.localPlayerId;
+        if (this.config.isHost) {
+          this.send({
+            type: "raceFinished",
+            winnerId: this.config.localPlayerId,
+            finishTimeSeconds: this.raceTimeSeconds,
+          });
+        }
         return;
     }
   }

@@ -64,13 +64,25 @@ export class NfsuClusterHudSkin implements HudSkin {
     ctx.arc(cx, cy, radius * 0.98, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Decorative N2O arc (outside the bezel, over the high-rpm region)
-    ctx.strokeStyle = "#37c4ff";
+    // LIVE N2O gauge arc: length = bottle remaining; color heats up with
+    // continuous use (blue -> orange -> red, near-blow).
+    const arcStart = startAngle + sweep * 0.55;
+    const arcFull = sweep * 0.43;
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
     ctx.lineWidth = radius * 0.09;
     ctx.beginPath();
-    ctx.arc(cx, cy, radius * 1.1, startAngle + sweep * 0.55, startAngle + sweep * 0.98);
+    ctx.arc(cx, cy, radius * 1.1, arcStart, arcStart + arcFull);
     ctx.stroke();
-    ctx.fillStyle = "#37c4ff";
+    if (state.nitroRemaining > 0) {
+      const nitroColor =
+        state.nitroHeat > 0.66 ? "#ff2e2e" : state.nitroHeat > 0.33 ? "#ff9b2f" : "#37c4ff";
+      ctx.strokeStyle = nitroColor;
+      ctx.lineWidth = radius * (state.nitroActive ? 0.12 : 0.09);
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 1.1, arcStart, arcStart + arcFull * state.nitroRemaining);
+      ctx.stroke();
+    }
+    ctx.fillStyle = state.nitroHeat > 0.66 ? "#ff2e2e" : "#37c4ff";
     ctx.font = `bold italic ${Math.floor(radius * 0.17)}px 'Chakra Petch', sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";

@@ -53,6 +53,9 @@ export function deriveHudState(
     maxRpm: engine.maxRpm,
     redlineRpm: engine.redlineRpm,
     gear,
+    nitroRemaining: 0,
+    nitroHeat: 0,
+    nitroActive: false,
   };
 }
 

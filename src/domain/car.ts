@@ -93,6 +93,8 @@ export interface CarInput {
   readonly brake: boolean;
   /** -1 (left) .. 1 (right). Unused on drag tracks, meaningful on circuit tracks. */
   readonly steer: number;
+  /** NOS button held (Shift/Space). Boost logic lives in RaceSession. */
+  readonly nitro?: boolean;
 }
 
 export const NEUTRAL_INPUT: CarInput = {

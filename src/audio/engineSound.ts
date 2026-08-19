@@ -105,3 +105,44 @@ export class EngineSound {
     this.subOctave.stop(now + 0.3);
   }
 }
+
+/**
+ * Catastrophic engine failure (NOS abuse): a deep bang, metal crackle and a
+ * long rumble dying away.
+ */
+export function playEngineBlow(): void {
+  const ctx = getAudioContext();
+  const now = ctx.currentTime;
+
+  // Deep bang: sine dropping 130 -> 35 Hz.
+  const bang = ctx.createOscillator();
+  bang.type = "sine";
+  bang.frequency.setValueAtTime(130, now);
+  bang.frequency.exponentialRampToValueAtTime(35, now + 0.5);
+  const bangGain = ctx.createGain();
+  bangGain.gain.setValueAtTime(0.5, now);
+  bangGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
+  bang.connect(bangGain).connect(getMasterGain());
+  bang.start(now);
+  bang.stop(now + 1);
+
+  // Debris/crackle: noise through a lowpass, ragged decay.
+  const durationSeconds = 1.4;
+  const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * durationSeconds), ctx.sampleRate);
+  const samples = buffer.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) {
+    samples[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / samples.length, 1.6);
+  }
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  const rumble = ctx.createBiquadFilter();
+  rumble.type = "lowpass";
+  rumble.frequency.setValueAtTime(1800, now);
+  rumble.frequency.exponentialRampToValueAtTime(220, now + durationSeconds);
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(0.35, now);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + durationSeconds);
+  noise.connect(rumble).connect(noiseGain).connect(getMasterGain());
+  noise.start(now);
+  noise.stop(now + durationSeconds);
+}

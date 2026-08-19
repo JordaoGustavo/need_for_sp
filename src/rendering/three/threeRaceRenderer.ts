@@ -1215,14 +1215,16 @@ export class ThreeRaceRenderer implements RaceRenderer {
     ctx.strokeRect(x, y, panelWidth, panelHeight);
 
     const solo = input.cars.length <= 1;
-    const header = solo
-      ? "CHEGADA!"
-      : input.localWon === null
-        ? "CHEGADA"
-        : input.localWon
-          ? "VOCÊ VENCEU!"
-          : "VOCÊ PERDEU";
-    ctx.fillStyle = input.localWon === false ? "#ff9b2f" : "#b8ff1f";
+    const header = input.engineBlown
+      ? "MOTOR ESTOUROU!"
+      : solo
+        ? "CHEGADA!"
+        : input.localWon === null
+          ? "CHEGADA"
+          : input.localWon
+            ? "VOCÊ VENCEU!"
+            : "VOCÊ PERDEU";
+    ctx.fillStyle = input.engineBlown ? "#ff2e2e" : input.localWon === false ? "#ff9b2f" : "#b8ff1f";
     ctx.font = "bold italic 32px 'Chakra Petch', sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(header, x + panelWidth / 2, y + 48);

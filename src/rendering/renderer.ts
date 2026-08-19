@@ -25,6 +25,8 @@ export interface RaceRenderInput {
   readonly localWon: boolean | null;
   /** Local player's finish time, once they crossed the line. */
   readonly localFinishTimeSeconds: number | null;
+  /** true when the local engine blew from NOS abuse (race lost). */
+  readonly engineBlown: boolean;
 }
 
 /**

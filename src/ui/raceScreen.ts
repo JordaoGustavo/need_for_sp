@@ -2,7 +2,8 @@ import { getCarById } from "../content/cars";
 import type { TrackDefinition } from "../domain/track";
 import type { CarDefinition } from "../domain/car";
 import { deriveHudState } from "../game/hudDerivation";
-import { EngineSound } from "../audio/engineSound";
+import { EngineSound, playEngineBlow } from "../audio/engineSound";
+import { NitroSound } from "../audio/nitroSound";
 import { TireSquealSound } from "../audio/tireSquealSound";
 import { LAUNCH_WHEELSPIN_MAX_KMH } from "../game/raceSession";
 import { KeyboardInputController } from "../game/inputController";
@@ -35,7 +36,9 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
 
   const localEngine = new EngineSound(config.localCar.sound);
   const tireSqueal = new TireSquealSound();
+  const nitroSound = new NitroSound();
   let remoteEngine: { carId: string; sound: EngineSound } | null = null;
+  let blowPlayed = false;
 
   const exitButton = document.createElement("button");
   exitButton.className = "race-exit-button hidden";
@@ -89,7 +92,15 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
     // Engine sound intensity tracks the usable rev range (idle..redline), so a
     // pegged needle means a screaming engine regardless of the dial's top number.
     if (snapshot.limiterCutTriggered) localEngine.cut();
-    localEngine.update(snapshot.localHud.rpm / snapshot.localHud.redlineRpm, 1);
+    if (snapshot.engineBlown && !blowPlayed) {
+      blowPlayed = true;
+      playEngineBlow();
+    }
+    localEngine.update(
+      snapshot.localHud.rpm / snapshot.localHud.redlineRpm,
+      snapshot.engineBlown ? 0 : 1,
+    );
+    nitroSound.update(snapshot.nitroActive);
     tireSqueal.update(computeSquealIntensity(snapshot, carInput));
 
     const cars: RenderedCar[] = [
@@ -120,6 +131,7 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
       finished: snapshot.finished,
       localWon: snapshot.winnerId === null ? null : snapshot.winnerId === config.localPlayerId,
       localFinishTimeSeconds: snapshot.localFinishTimeSeconds,
+      engineBlown: snapshot.engineBlown,
     });
 
     exitButton.classList.toggle("hidden", !snapshot.finished);
@@ -136,6 +148,7 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
     renderer.dispose();
     localEngine.dispose();
     tireSqueal.dispose();
+    nitroSound.dispose();
     remoteEngine?.sound.dispose();
   };
   root.addEventListener("screen-teardown", cleanup, { once: true });
