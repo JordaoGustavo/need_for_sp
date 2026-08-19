@@ -11,6 +11,8 @@ import type { TrackDefinition } from "../../domain/track";
 
 export interface TrackPose {
   readonly x: number;
+  /** Road elevation at this point (visual only; physics stays 2D). */
+  readonly y: number;
   readonly z: number;
   /**
    * Track direction at this point, as the yaw to add to a car's own heading
@@ -23,6 +25,8 @@ export interface TrackSample {
   /** Distance along the path this sample corresponds to, in meters. */
   readonly d: number;
   readonly x: number;
+  /** Road elevation at this sample. */
+  readonly y: number;
   readonly z: number;
   /** Unit normal (left-to-right across the road). */
   readonly nx: number;
@@ -50,6 +54,7 @@ export function createTrackPathModel(track: TrackDefinition): TrackPathModel {
 function createStraightModel(): TrackPathModel {
   const pose = (distanceMeters: number, lateralMeters: number): TrackPose => ({
     x: lateralMeters,
+    y: 0,
     z: -distanceMeters,
     forwardAngleRad: 0,
   });
@@ -59,7 +64,7 @@ function createStraightModel(): TrackPathModel {
     sample(stepMeters, fromMeters, toMeters) {
       const samples: TrackSample[] = [];
       for (let d = fromMeters; d <= toMeters; d += stepMeters) {
-        samples.push({ d, x: 0, z: -d, nx: 1, nz: 0 });
+        samples.push({ d, x: 0, y: 0, z: -d, nx: 1, nz: 0 });
       }
       return samples;
     },
@@ -96,6 +101,27 @@ function createCurveModel(track: TrackDefinition, closed: boolean): TrackPathMod
   const curve = new THREE.CatmullRomCurve3(points, closed, "centripetal");
   const length = track.lengthMeters;
 
+  // Visual elevation profile: smoothstep-interpolated between key points,
+  // clamped flat beyond the ends.
+  const elevationPoints = [...(track.elevation ?? [])].sort((a, b) => a.atMeters - b.atMeters);
+  const elevationAt = (distanceMeters: number): number => {
+    if (elevationPoints.length === 0) return 0;
+    const first = elevationPoints[0]!;
+    const last = elevationPoints[elevationPoints.length - 1]!;
+    if (distanceMeters <= first.atMeters) return first.yMeters;
+    if (distanceMeters >= last.atMeters) return last.yMeters;
+    for (let i = 0; i < elevationPoints.length - 1; i++) {
+      const a = elevationPoints[i]!;
+      const b = elevationPoints[i + 1]!;
+      if (distanceMeters >= a.atMeters && distanceMeters <= b.atMeters) {
+        const t = (distanceMeters - a.atMeters) / Math.max(1, b.atMeters - a.atMeters);
+        const eased = t * t * (3 - 2 * t);
+        return a.yMeters + (b.yMeters - a.yMeters) * eased;
+      }
+    }
+    return last.yMeters;
+  };
+
   const pointAndTangentAt = (distanceMeters: number): { p: THREE.Vector3; t: THREE.Vector3 } => {
     if (closed) {
       const wrapped = ((distanceMeters % length) + length) % length;
@@ -122,6 +148,7 @@ function createCurveModel(track: TrackDefinition, closed: boolean): TrackPathMod
     const nz = t.x;
     return {
       x: p.x + nx * lateralMeters,
+      y: elevationAt(distanceMeters),
       z: p.z + nz * lateralMeters,
       forwardAngleRad: Math.atan2(t.x, -t.z),
     };
@@ -134,7 +161,7 @@ function createCurveModel(track: TrackDefinition, closed: boolean): TrackPathMod
       const samples: TrackSample[] = [];
       for (let d = fromMeters; d <= toMeters; d += stepMeters) {
         const { p, t } = pointAndTangentAt(d);
-        samples.push({ d, x: p.x, z: p.z, nx: -t.z, nz: t.x });
+        samples.push({ d, x: p.x, y: elevationAt(d), z: p.z, nx: -t.z, nz: t.x });
       }
       return samples;
     },

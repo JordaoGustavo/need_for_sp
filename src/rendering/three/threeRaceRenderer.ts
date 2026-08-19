@@ -173,7 +173,7 @@ export class ThreeRaceRenderer implements RaceRenderer {
       for (const distance of [track.lengthMeters + 5, track.lengthMeters + TRACK_END_RUNOFF_METERS * 0.6]) {
         const pose = this.pathModel.pose(distance, 0);
         const flood = new THREE.PointLight(0xfff0cc, 60, 55, 1.6);
-        flood.position.set(pose.x, 9, pose.z);
+        flood.position.set(pose.x, pose.y + 9, pose.z);
         this.scene.add(flood);
       }
     }
@@ -184,6 +184,31 @@ export class ThreeRaceRenderer implements RaceRenderer {
     }
     this.addScenery(track, samples);
     this.addTunnels(track);
+    this.addViaductSupports(track, samples);
+  }
+
+  /**
+   * Where the road runs high above the ground (and outside tunnels), it is a
+   * viaduct: concrete pillar pairs march down to the forest floor, SP-160
+   * style.
+   */
+  private addViaductSupports(track: TrackDefinition, samples: readonly TrackSample[]): void {
+    const pillarMaterial = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.85 });
+    for (let i = 0; i < samples.length; i += 4) {
+      const s = samples[i]!;
+      if (s.y < 6) continue;
+      if (this.isInsideTunnel(track, s.d, 8)) continue;
+      for (const side of [-1, 1]) {
+        const offset = side * (track.widthMeters / 2 - 2.2);
+        const pillar = new THREE.Mesh(
+          new THREE.CylinderGeometry(1.3, 1.5, s.y + 2, 10),
+          pillarMaterial,
+        );
+        // Top sits just under the deck so it never pokes through the asphalt.
+        pillar.position.set(s.x + s.nx * offset, (s.y + 2) / 2 - 2.4, s.z + s.nz * offset);
+        this.scene.add(pillar);
+      }
+    }
   }
 
   /** Sky/fog per scenery AND time of day: city glow, open highway, serra mist. */
@@ -256,8 +281,8 @@ export class ThreeRaceRenderer implements RaceRenderer {
     for (const s of samples) {
       const cx = s.x + s.nx * offsetMeters;
       const cz = s.z + s.nz * offsetMeters;
-      positions.push(cx - s.nx * (widthMeters / 2), y, cz - s.nz * (widthMeters / 2));
-      positions.push(cx + s.nx * (widthMeters / 2), y, cz + s.nz * (widthMeters / 2));
+      positions.push(cx - s.nx * (widthMeters / 2), s.y + y, cz - s.nz * (widthMeters / 2));
+      positions.push(cx + s.nx * (widthMeters / 2), s.y + y, cz + s.nz * (widthMeters / 2));
       uvs.push(0, s.d / 6, widthMeters / 6, s.d / 6);
     }
     const indices: number[] = [];
@@ -285,8 +310,8 @@ export class ThreeRaceRenderer implements RaceRenderer {
     for (const s of samples) {
       const cx = s.x + s.nx * offsetMeters;
       const cz = s.z + s.nz * offsetMeters;
-      positions.push(cx, y0, cz);
-      positions.push(cx, y1, cz);
+      positions.push(cx, s.y + y0, cz);
+      positions.push(cx, s.y + y1, cz);
     }
     const indices: number[] = [];
     for (let i = 0; i < samples.length - 1; i++) {
@@ -300,18 +325,24 @@ export class ThreeRaceRenderer implements RaceRenderer {
     this.scene.add(new THREE.Mesh(geometry, material));
   }
 
+  /** Dashed lane-divider lines: (lanes - 1) rows of dashes across the width. */
   private addCenterDashes(track: TrackDefinition, fromMeters: number, toMeters: number): void {
     const material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 });
     const geometry = new THREE.PlaneGeometry(0.25, 5);
-    for (let d = fromMeters; d < toMeters; d += 12) {
-      const pose = this.pathModel!.pose(d, 0);
-      const dash = new THREE.Mesh(geometry, material);
-      // Yaw to the track direction first, then lay the plane flat on the road.
-      dash.rotation.order = "YXZ";
-      dash.rotation.y = -pose.forwardAngleRad;
-      dash.rotation.x = -Math.PI / 2;
-      dash.position.set(pose.x, 0.01, pose.z);
-      this.scene.add(dash);
+    const lanes = Math.max(2, track.lanes ?? 2);
+    const laneWidth = track.widthMeters / lanes;
+    for (let lane = 1; lane < lanes; lane++) {
+      const lateral = -track.widthMeters / 2 + laneWidth * lane;
+      for (let d = fromMeters; d < toMeters; d += 12) {
+        const pose = this.pathModel!.pose(d, lateral);
+        const dash = new THREE.Mesh(geometry, material);
+        // Yaw to the track direction first, then lay the plane flat on the road.
+        dash.rotation.order = "YXZ";
+        dash.rotation.y = -pose.forwardAngleRad;
+        dash.rotation.x = -Math.PI / 2;
+        dash.position.set(pose.x, pose.y + 0.01, pose.z);
+        this.scene.add(dash);
+      }
     }
   }
 
@@ -319,7 +350,7 @@ export class ThreeRaceRenderer implements RaceRenderer {
   private anchorAt(distanceMeters: number): THREE.Group {
     const pose = this.pathModel!.pose(distanceMeters, 0);
     const anchor = new THREE.Group();
-    anchor.position.set(pose.x, 0, pose.z);
+    anchor.position.set(pose.x, pose.y, pose.z);
     anchor.rotation.y = -pose.forwardAngleRad;
     this.scene.add(anchor);
     return anchor;
@@ -420,7 +451,7 @@ export class ThreeRaceRenderer implements RaceRenderer {
       const side = Math.round(d / spacing) % 2 === 0 ? -1 : 1;
       const pose = this.pathModel!.pose(d, side * (track.widthMeters / 2 + 1.6));
       const anchor = new THREE.Group();
-      anchor.position.set(pose.x, 0, pose.z);
+      anchor.position.set(pose.x, pose.y, pose.z);
       anchor.rotation.y = -pose.forwardAngleRad;
       this.scene.add(anchor);
 
@@ -468,12 +499,15 @@ export class ThreeRaceRenderer implements RaceRenderer {
         this.addCityBuildings(track, samples, random, Math.round(track.lengthMeters / 34));
         return;
       case "highway":
-        this.addCityBuildings(track, samples, random, Math.round(track.lengthMeters / 140));
-        this.addTrees(track, samples, random, Math.round(track.lengthMeters / 22), 8, 60);
+        // SP-348: mostly vegetation and green hills around the carriageway.
+        this.addTrees(track, samples, random, Math.round(track.lengthMeters / 12), 8, 70);
+        this.addMorros(track, samples, random, 10);
+        this.addCityBuildings(track, samples, random, Math.round(track.lengthMeters / 300));
         return;
       case "serra":
         // Mata Atlântica pressing against the road (SP-160 style).
         this.addTrees(track, samples, random, Math.round(track.lengthMeters / 7), 3.5, 46);
+        this.addMorros(track, samples, random, 12);
         return;
       case "autodromo":
         this.addAutodromo(track, samples, random);
@@ -671,6 +705,42 @@ export class ThreeRaceRenderer implements RaceRenderer {
     }
   }
 
+  /** Big soft green hills on the horizon — the morros framing SP highways. */
+  private addMorros(
+    track: TrackDefinition,
+    samples: readonly TrackSample[],
+    random: () => number,
+    count: number,
+  ): void {
+    const day = this.timeOfDay === "day";
+    const materials = [0x1d4419, 0x25541f, 0x173a14].map(
+      (color) =>
+        new THREE.MeshStandardMaterial({
+          color: day ? color : (color & 0xfefefe) >> 1,
+          roughness: 1,
+        }),
+    );
+    for (let i = 0; i < count; i++) {
+      const s = samples[Math.floor(random() * samples.length)]!;
+      const side = random() < 0.5 ? -1 : 1;
+      const offset = 140 + random() * 260;
+      const x = s.x + s.nx * side * offset;
+      const z = s.z + s.nz * side * offset;
+      const radius = 90 + random() * 150;
+      const clear = samples.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 > (radius + 30) ** 2);
+      if (!clear) continue;
+
+      const height = 30 + random() * 55;
+      const morro = new THREE.Mesh(
+        new THREE.ConeGeometry(radius, height, 9),
+        materials[Math.floor(random() * materials.length)]!,
+      );
+      morro.position.set(x, height / 2 - 4, z);
+      morro.rotation.y = random() * Math.PI;
+      this.scene.add(morro);
+    }
+  }
+
   private addTrees(
     track: TrackDefinition,
     samples: readonly TrackSample[],
@@ -734,7 +804,7 @@ export class ThreeRaceRenderer implements RaceRenderer {
       for (let i = 0; i < samples.length; i += 3) {
         const s = samples[i]!;
         const mound = new THREE.Mesh(new THREE.BoxGeometry(track.widthMeters + 14, 9, 22), rock);
-        mound.position.set(s.x, 5.5, s.z);
+        mound.position.set(s.x, s.y + 5.5, s.z);
         mound.rotation.y = -Math.atan2(s.nx, s.nz) + Math.PI / 2;
         this.scene.add(mound);
       }
@@ -759,7 +829,7 @@ export class ThreeRaceRenderer implements RaceRenderer {
         this.carMeshes[i] = entry;
       }
       const pose = this.pathModel!.pose(car.state.distanceMeters, car.state.lateralOffsetMeters);
-      entry.mesh.position.set(pose.x, 0, pose.z);
+      entry.mesh.position.set(pose.x, pose.y, pose.z);
       entry.mesh.rotation.y = -(car.state.headingRad + pose.forwardAngleRad);
     }
   }
@@ -775,8 +845,11 @@ export class ThreeRaceRenderer implements RaceRenderer {
     const sin = Math.sin(yaw);
     const cos = Math.cos(yaw);
     const back = 8.5 + speedFraction * 2;
-    this.camera.position.set(pose.x - sin * back, 3.2 + speedFraction * 0.6, pose.z + cos * back);
-    this.camera.lookAt(pose.x + sin * 12, 1.2, pose.z - cos * 12);
+    // Camera rides the road elevation (sampled slightly behind, so crests
+    // and viaducts read naturally).
+    const camY = this.pathModel!.pose(localCar.state.distanceMeters - back, 0).y;
+    this.camera.position.set(pose.x - sin * back, camY + 3.2 + speedFraction * 0.6, pose.z + cos * back);
+    this.camera.lookAt(pose.x + sin * 12, pose.y + 1.2, pose.z - cos * 12);
   }
 
   private drawOverlay(input: RaceRenderInput): void {

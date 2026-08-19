@@ -13,8 +13,19 @@ export const BANDEIRANTITA: TrackDefinition = {
   lengthMeters: 1500,
   laps: 1,
   checkpoints: [],
-  widthMeters: 12,
+  // A Bandeirantes real tem 3+ faixas por sentido — pista larga de autoestrada.
+  widthMeters: 16,
+  lanes: 4,
   scenery: "highway",
+  // Ondulação suave do planalto.
+  elevation: [
+    { atMeters: 0, yMeters: 0 },
+    { atMeters: 350, yMeters: 7 },
+    { atMeters: 700, yMeters: 3 },
+    { atMeters: 1000, yMeters: 9 },
+    { atMeters: 1300, yMeters: 2 },
+    { atMeters: 1500, yMeters: 0 },
+  ],
   // Gentle sweeping S-curves, like the SP-348 alignment between SP and Jundiaí.
   path: [
     { x: 0, z: 0 },

@@ -27,6 +27,12 @@ export interface TrackTunnel {
   readonly endMeters: number;
 }
 
+/** Elevation profile key point: road height (visual) at a distance along the path. */
+export interface TrackElevationPoint {
+  readonly atMeters: number;
+  readonly yMeters: number;
+}
+
 export interface TrackDefinition {
   readonly id: string;
   readonly displayName: string;
@@ -56,6 +62,14 @@ export interface TrackDefinition {
   readonly path?: readonly TrackPathPoint[];
   /** Tunnel sections along the path (serra tracks). */
   readonly tunnels?: readonly TrackTunnel[];
+  /** Traffic lanes drawn on the road surface (default 2 = one center dash line). */
+  readonly lanes?: number;
+  /**
+   * Road elevation along the path, interpolated between points (default flat).
+   * Purely visual: where the road runs high above the ground, the renderer
+   * builds viaduct pillars — the "highway above the forest" of the SP-160.
+   */
+  readonly elevation?: readonly TrackElevationPoint[];
 }
 
 /** Per-player race progress, updated every tick from CarRuntimeState.distanceMeters. */

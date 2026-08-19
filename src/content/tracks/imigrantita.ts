@@ -15,8 +15,23 @@ export const IMIGRANTITA: TrackDefinition = {
   lengthMeters: 2200,
   laps: 1,
   checkpoints: [],
-  widthMeters: 12,
+  // Pista larga como a SP-160 real.
+  widthMeters: 15,
+  lanes: 3,
   scenery: "serra",
+  // A descida da serra: começa no alto do planalto e desce ao nível do mar,
+  // com os trechos altos virando viadutos sobre a floresta (pilares
+  // automáticos onde a pista corre elevada e fora de túnel).
+  elevation: [
+    { atMeters: 0, yMeters: 56 },
+    { atMeters: 380, yMeters: 50 },
+    { atMeters: 800, yMeters: 42 },
+    { atMeters: 1000, yMeters: 36 },
+    { atMeters: 1200, yMeters: 30 },
+    { atMeters: 1800, yMeters: 16 },
+    { atMeters: 2050, yMeters: 4 },
+    { atMeters: 2200, yMeters: 0 },
+  ],
   // Serpentine alignment echoing the SP-160 serra descent (see the map: long
   // west-east sweeps down the mountain).
   path: [
