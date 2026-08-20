@@ -6,6 +6,7 @@ import { applyCarEnvironmentMap, buildCarMesh, disposeCarMesh } from "./carMesh"
 import { animateCrowd, buildCrowd, sendCrowdToCar, type CrowdPerson } from "./crowd";
 import { TRACK_END_RUNOFF_METERS } from "../../physics/carPhysics";
 import { createTrackPathModel, type TrackPathModel, type TrackSample } from "./trackPath";
+import { ExplosionEffect } from "./explosionEffect";
 
 const HUD_HEIGHT_FRACTION = 0.3;
 
@@ -36,6 +37,8 @@ export class ThreeRaceRenderer implements RaceRenderer {
   private crowdMobilized = false;
   private lastFrameMs: number | null = null;
   private carMeshes: { carId: string; mesh: THREE.Group }[] = [];
+  private explosion: ExplosionEffect | null = null;
+  private engineBlownSeen = false;
   private disposed = false;
   // Mouse-orbit look-around: dragging adds a yaw/height offset to the chase
   // camera (see updateChaseCamera); releasing eases it back to zero.
@@ -148,6 +151,8 @@ export class ThreeRaceRenderer implements RaceRenderer {
     }
     animateCrowd(this.crowdPeople, nowMs / 1000, dtSeconds);
 
+    this.updateExplosion(input, localCar, dtSeconds);
+
     if (localCar) this.updateChaseCamera(localCar);
 
     this.webgl.render(this.scene, this.camera);
@@ -161,6 +166,7 @@ export class ThreeRaceRenderer implements RaceRenderer {
     this.container.removeEventListener("pointerup", this.onPointerUp);
     this.container.removeEventListener("pointercancel", this.onPointerUp);
     for (const entry of this.carMeshes) disposeCarMesh(entry.mesh);
+    this.explosion?.dispose();
     this.webgl.dispose();
     this.webgl.domElement.remove();
     this.overlayCtx.canvas.remove();
@@ -1177,6 +1183,36 @@ export class ThreeRaceRenderer implements RaceRenderer {
   }
 
   // --- per-frame updates ----------------------------------------------------
+
+  /**
+   * NOS abuse ending: on the frame engineBlown flips true, detonate a fireball
+   * on the local car's hood; afterwards the dead car trails smoke while it
+   * coasts out.
+   */
+  private updateExplosion(
+    input: RaceRenderInput,
+    localCar: RenderedCar | undefined,
+    dtSeconds: number,
+  ): void {
+    if (!input.engineBlown || !localCar) {
+      this.explosion?.update(dtSeconds, null);
+      return;
+    }
+    const pose = this.pathModel!.pose(localCar.state.distanceMeters, localCar.state.lateralOffsetMeters);
+    const yaw = localCar.state.headingRad + pose.forwardAngleRad;
+    // Engine bay sits ahead of the car's center (forward = (sin, -cos)).
+    const hood = {
+      x: pose.x + Math.sin(yaw) * 1.1,
+      y: pose.y + 0.75,
+      z: pose.z - Math.cos(yaw) * 1.1,
+    };
+    if (!this.engineBlownSeen) {
+      this.engineBlownSeen = true;
+      this.explosion ??= new ExplosionEffect(this.scene);
+      this.explosion.trigger(hood.x, hood.y, hood.z);
+    }
+    this.explosion?.update(dtSeconds, hood);
+  }
 
   private syncCarMeshes(cars: readonly RenderedCar[]): void {
     for (let i = 0; i < cars.length; i++) {
