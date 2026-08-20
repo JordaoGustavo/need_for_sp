@@ -1,4 +1,5 @@
 import { defaultSignalingUrl } from "../config";
+import { getLobby } from "../net/lobbyClient";
 import { hostRoom, joinRoom } from "../net/roomConnection";
 import { parseRoomCodeFromUrl, withTimeOfDayParam, withTrackParam } from "../net/roomCode";
 import type { PeerConnection } from "../net/webrtcConnection";
@@ -78,6 +79,7 @@ export function renderRoomScreen(
     linkInput.value = inviteUrl;
     linkBox.classList.remove("hidden");
     status.textContent = `Sala ${roomCode} criada. Compartilhe o link e aguarde o outro jogador...`;
+    root.appendChild(buildFriendInvitePanel(inviteUrl, roomCode, root));
 
     peerConnectionPromise
       .then((peer) => onReady({ peer, isHost: true, roomCode }))
@@ -87,6 +89,69 @@ export function renderRoomScreen(
   }
 
   return root;
+}
+
+/**
+ * "Convidar amigos" panel for the host: online friends get an invite button
+ * that pushes the room invite straight to their screen (friends widget toast);
+ * the copyable link above stays as the universal fallback.
+ */
+function buildFriendInvitePanel(inviteUrl: string, roomCode: string, screenRoot: HTMLElement): HTMLElement {
+  const lobby = getLobby();
+  const panel = document.createElement("div");
+  panel.className = "room-friends-panel";
+
+  const title = document.createElement("div");
+  title.className = "friends-title";
+  panel.appendChild(title);
+
+  const list = document.createElement("div");
+  list.className = "friends-list";
+  panel.appendChild(list);
+
+  const unsubscribe = lobby.subscribe((state) => {
+    if (state.kind !== "online") {
+      title.textContent = "Convidar amigos — defina seu nick no painel de amigos";
+      list.replaceChildren();
+      return;
+    }
+    title.textContent = "Convidar amigos";
+    list.replaceChildren();
+    const online = state.friends.filter((friend) => friend.online);
+    if (online.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "friends-empty";
+      empty.textContent = "Nenhum amigo online agora — use o link acima.";
+      list.appendChild(empty);
+      return;
+    }
+    for (const friend of online) {
+      const row = document.createElement("div");
+      row.className = "friends-row";
+      const name = document.createElement("span");
+      name.className = "friend-name";
+      name.textContent = friend.nick;
+      const invite = document.createElement("button");
+      invite.className = "friends-button";
+      invite.textContent = "Convidar";
+      invite.addEventListener("click", () => {
+        lobby.inviteFriend(friend.nick, inviteUrl, roomCode);
+        invite.textContent = "Convidado ✓";
+        invite.disabled = true;
+        window.setTimeout(() => {
+          invite.textContent = "Convidar";
+          invite.disabled = false;
+        }, 5000);
+      });
+      row.append(name, invite);
+      list.appendChild(row);
+    }
+  });
+  // showScreen dispatches teardown on the screen's root element, not on
+  // nested nodes — hook it there so the lobby subscription is released.
+  screenRoot.addEventListener("screen-teardown", unsubscribe, { once: true });
+
+  return panel;
 }
 
 function buildSelectionConfirmation(youtuber: YoutuberProfile, car: CarDefinition): HTMLElement {

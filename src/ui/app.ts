@@ -9,6 +9,7 @@ import { renderTrackSelectScreen } from "./menu/trackSelectScreen";
 import { renderRoomScreen, type RoomScreenResult } from "./roomScreen";
 import { renderRaceScreen } from "./raceScreen";
 import { ensureMenuMusic, stopMenuMusic } from "../audio/menuMusic";
+import { mountFriendsWidget } from "./friendsWidget";
 import { parseRoomCodeFromUrl, parseTimeOfDayFromUrl, parseTrackIdFromUrl } from "../net/roomCode";
 import type { TimeOfDay } from "../rendering/renderer";
 
@@ -21,6 +22,9 @@ import type { TimeOfDay } from "../rendering/renderer";
  */
 export function startApp(container: HTMLElement): void {
   ensureMenuMusic();
+  // Friends panel lives OUTSIDE the screen container so it survives menu
+  // transitions (nick claim, presence, incoming room invites).
+  mountFriendsWidget(container.parentElement ?? document.body);
   showScreen(container, renderYoutuberSelectScreen(onYoutuberSelected));
 
   function onYoutuberSelected(youtuber: YoutuberProfile): void {
@@ -118,6 +122,8 @@ export function startApp(container: HTMLElement): void {
     >,
   ): void {
     stopMenuMusic();
+    // Hides the friends panel while racing (cleared by the exit reload).
+    document.body.classList.add("in-race");
     showScreen(
       container,
       renderRaceScreen({

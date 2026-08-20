@@ -1,10 +1,15 @@
 import { WebSocketServer, type WebSocket } from "ws";
-import type {
-  ClientToServerMessage,
-  PeerRole,
-  ServerToClientMessage,
-  SignalPayload,
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import {
+  isValidNick,
+  type ClientToServerMessage,
+  type FriendInfo,
+  type PeerRole,
+  type ServerToClientMessage,
+  type SignalPayload,
 } from "../src/net/signalingProtocol";
+import { LobbyStore, canonicalNick } from "./lobbyStore";
 
 /**
  * Minimal signaling server (ADR 0003). Its only job is to let a 'host' and a 'guest'
@@ -46,11 +51,33 @@ class RoomState {
 
 const rooms = new Map<string, RoomState>();
 
+// --- Lobby (friends) layer --------------------------------------------------
+
+const lobbyStore = new LobbyStore(join(dirname(fileURLToPath(import.meta.url)), "lobbyStore.json"));
+/** Online lobby connections keyed by canonical nick (one socket per nick). */
+const onlineByNick = new Map<string, WebSocket>();
+
+function friendListFor(nick: string): FriendInfo[] {
+  return lobbyStore.friendsOf(nick).map((friendNick) => ({
+    nick: friendNick,
+    online: onlineByNick.has(canonicalNick(friendNick)),
+  }));
+}
+
+/** Push updated friend lists to everyone who has `nick` as a friend and is online. */
+function broadcastPresenceChange(nick: string): void {
+  for (const friendNick of lobbyStore.friendsOf(nick)) {
+    const socket = onlineByNick.get(canonicalNick(friendNick));
+    if (socket) send(socket, { type: "friends", friends: friendListFor(friendNick) });
+  }
+}
+
 const wss = new WebSocketServer({ port: PORT });
 
 wss.on("connection", (socket) => {
   let joinedRoom: string | null = null;
   let joinedRole: PeerRole | null = null;
+  let lobbyNick: string | null = null;
 
   socket.on("message", (raw) => {
     const message = parseClientMessage(raw.toString());
@@ -89,10 +116,69 @@ wss.on("connection", (socket) => {
       if (peer) {
         send(peer, { type: "signal", payload: message.payload });
       }
+      return;
+    }
+
+    if (message.type === "lobby-login") {
+      const result = lobbyStore.login(message.nick, message.token);
+      if (!result.ok) {
+        send(socket, { type: "lobby-error", message: result.message });
+        return;
+      }
+      const key = canonicalNick(result.nick);
+      const previous = onlineByNick.get(key);
+      if (previous && previous !== socket) previous.close();
+      onlineByNick.set(key, socket);
+      lobbyNick = result.nick;
+      send(socket, { type: "lobby-ok", nick: result.nick, friends: friendListFor(result.nick) });
+      broadcastPresenceChange(result.nick);
+      return;
+    }
+
+    if (message.type === "add-friend") {
+      if (!lobbyNick) {
+        send(socket, { type: "lobby-error", message: "Faça login primeiro" });
+        return;
+      }
+      const result = lobbyStore.addFriend(lobbyNick, message.nick);
+      if (!result.ok) {
+        send(socket, { type: "lobby-error", message: result.message });
+        return;
+      }
+      send(socket, { type: "friends", friends: friendListFor(lobbyNick) });
+      // The new friend (if online) instantly sees the friendship too.
+      const friendSocket = onlineByNick.get(canonicalNick(result.friendNick));
+      if (friendSocket) {
+        send(friendSocket, { type: "friends", friends: friendListFor(result.friendNick) });
+      }
+      return;
+    }
+
+    if (message.type === "invite-friend") {
+      if (!lobbyNick) {
+        send(socket, { type: "lobby-error", message: "Faça login primeiro" });
+        return;
+      }
+      const friendSocket = onlineByNick.get(canonicalNick(message.nick));
+      if (!friendSocket) {
+        send(socket, { type: "lobby-error", message: `${message.nick} não está online` });
+        return;
+      }
+      send(friendSocket, {
+        type: "room-invite",
+        from: lobbyNick,
+        inviteUrl: message.inviteUrl,
+        roomCode: message.roomCode,
+      });
+      return;
     }
   });
 
   socket.on("close", () => {
+    if (lobbyNick && onlineByNick.get(canonicalNick(lobbyNick)) === socket) {
+      onlineByNick.delete(canonicalNick(lobbyNick));
+      broadcastPresenceChange(lobbyNick);
+    }
     if (!joinedRoom || !joinedRole) return;
     const room = rooms.get(joinedRoom);
     if (!room) return;
@@ -138,6 +224,29 @@ function parseClientMessage(raw: string): ClientToServerMessage | null {
     if (typeof candidate.room !== "string" || !candidate.room) return null;
     if (typeof candidate.payload !== "object" || candidate.payload === null) return null;
     return { type: "signal", room: candidate.room, payload: candidate.payload as SignalPayload };
+  }
+
+  if (candidate.type === "lobby-login") {
+    if (typeof candidate.nick !== "string" || !isValidNick(candidate.nick)) return null;
+    if (typeof candidate.token !== "string" || !candidate.token) return null;
+    return { type: "lobby-login", nick: candidate.nick, token: candidate.token };
+  }
+
+  if (candidate.type === "add-friend") {
+    if (typeof candidate.nick !== "string" || !isValidNick(candidate.nick)) return null;
+    return { type: "add-friend", nick: candidate.nick };
+  }
+
+  if (candidate.type === "invite-friend") {
+    if (typeof candidate.nick !== "string" || !isValidNick(candidate.nick)) return null;
+    if (typeof candidate.inviteUrl !== "string" || candidate.inviteUrl.length > 2048) return null;
+    if (typeof candidate.roomCode !== "string" || candidate.roomCode.length > 32) return null;
+    return {
+      type: "invite-friend",
+      nick: candidate.nick,
+      inviteUrl: candidate.inviteUrl,
+      roomCode: candidate.roomCode,
+    };
   }
 
   return null;

@@ -727,3 +727,182 @@ body {
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
   z-index: 1;
 }
+
+/* --- Friends widget & room invites ------------------------------------------ */
+
+.friends-widget {
+  position: fixed;
+  left: 16px;
+  top: 220px;
+  width: 250px;
+  background: var(--bg-panel, rgba(10, 14, 22, 0.92));
+  border: 1px solid var(--text-dim, #556);
+  border-radius: 8px;
+  padding: 12px;
+  z-index: 40;
+  font-size: 0.8rem;
+  color: var(--text, #e8eaf0);
+}
+
+.friends-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.72rem;
+  color: var(--neon, #b8ff1f);
+  margin-bottom: 8px;
+}
+
+.friends-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 150px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+
+.friends-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.friends-empty {
+  color: var(--text-dim, #8892a6);
+  font-size: 0.75rem;
+}
+
+.friend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555d6e;
+  flex: none;
+}
+
+.friend-dot.online {
+  background: #37e05d;
+  box-shadow: 0 0 6px #37e05d;
+}
+
+.friend-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-presence {
+  color: var(--text-dim, #8892a6);
+  font-size: 0.68rem;
+}
+
+.friends-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--text-dim, #556);
+  border-radius: 4px;
+  color: inherit;
+  font-family: inherit;
+  font-size: 0.78rem;
+  padding: 5px 8px;
+}
+
+.friends-button {
+  background: transparent;
+  border: 1px solid var(--neon, #b8ff1f);
+  color: var(--neon, #b8ff1f);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.friends-button:hover:not(:disabled) {
+  background: rgba(184, 255, 31, 0.12);
+}
+
+.friends-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.friends-button.subtle {
+  border-color: var(--text-dim, #8892a6);
+  color: var(--text-dim, #8892a6);
+}
+
+.friends-error,
+.friends-notice {
+  color: #ff7a7a;
+  font-size: 0.72rem;
+  margin-top: 6px;
+  min-height: 1em;
+}
+
+.invite-toast-host {
+  position: fixed;
+  right: 16px;
+  /* Below the race exit button so end-of-race UI stays clickable. */
+  top: 70px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 50;
+}
+
+.invite-toast {
+  background: var(--bg-panel, rgba(10, 14, 22, 0.95));
+  border: 1px solid var(--neon, #b8ff1f);
+  border-radius: 8px;
+  padding: 12px 14px;
+  width: 280px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.invite-toast-text {
+  font-size: 0.82rem;
+  margin-bottom: 10px;
+}
+
+.invite-toast-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.room-friends-panel {
+  margin-top: 18px;
+  width: min(420px, 90vw);
+}
+
+.friends-header {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--neon, #b8ff1f);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.friends-widget.collapsed {
+  width: auto;
+  padding: 8px 12px;
+}
+
+.friends-widget:not(.collapsed) .friends-header {
+  margin-bottom: 10px;
+}
+
+/* During a race the panel would sit on top of the HUD — hide it. */
+body.in-race .friends-widget {
+  display: none;
+}
