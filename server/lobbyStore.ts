@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { isValidNick } from "../src/net/signalingProtocol";
 
 /**
@@ -70,6 +70,11 @@ export class LobbyStore {
   }
 
   /** Mutual friendship: both users see each other after one add. */
+  areFriends(nickA: string, nickB: string): boolean {
+    const a = this.users.get(canonicalNick(nickA));
+    return a !== undefined && a.friends.includes(canonicalNick(nickB));
+  }
+
   addFriend(ownerNick: string, friendNick: string): AddFriendResult {
     const ownerKey = canonicalNick(ownerNick);
     const friendKey = canonicalNick(friendNick);
@@ -99,7 +104,11 @@ export class LobbyStore {
   private save(): void {
     if (!this.filePath) return;
     try {
-      writeFileSync(this.filePath, JSON.stringify({ users: Object.fromEntries(this.users) }, null, 2));
+      // Owner-only: the file holds identity tokens (credentials).
+      writeFileSync(this.filePath, JSON.stringify({ users: Object.fromEntries(this.users) }, null, 2), {
+        mode: 0o600,
+      });
+      chmodSync(this.filePath, 0o600);
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error("[lobby] failed to persist store", error);

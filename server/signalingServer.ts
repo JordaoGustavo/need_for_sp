@@ -159,6 +159,12 @@ wss.on("connection", (socket) => {
         send(socket, { type: "lobby-error", message: "Faça login primeiro" });
         return;
       }
+      // Only friends can push invites onto someone's screen — anyone else
+      // still has the shareable link, which requires the recipient to act.
+      if (!lobbyStore.areFriends(lobbyNick, message.nick)) {
+        send(socket, { type: "lobby-error", message: `Adicione ${message.nick} como amigo antes de convidar` });
+        return;
+      }
       const friendSocket = onlineByNick.get(canonicalNick(message.nick));
       if (!friendSocket) {
         send(socket, { type: "lobby-error", message: `${message.nick} não está online` });
@@ -196,6 +202,16 @@ wss.on("connection", (socket) => {
 
 function isValidRole(value: unknown): value is PeerRole {
   return value === "host" || value === "guest";
+}
+
+/** Invite URLs are navigated to on the recipient's browser — http(s) only. */
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -240,6 +256,7 @@ function parseClientMessage(raw: string): ClientToServerMessage | null {
   if (candidate.type === "invite-friend") {
     if (typeof candidate.nick !== "string" || !isValidNick(candidate.nick)) return null;
     if (typeof candidate.inviteUrl !== "string" || candidate.inviteUrl.length > 2048) return null;
+    if (!isHttpUrl(candidate.inviteUrl)) return null;
     if (typeof candidate.roomCode !== "string" || candidate.roomCode.length > 32) return null;
     return {
       type: "invite-friend",

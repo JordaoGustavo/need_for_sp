@@ -191,9 +191,20 @@ export function mountFriendsWidget(parent: HTMLElement): void {
     accept.className = "friends-button";
     accept.textContent = "Aceitar";
     accept.addEventListener("click", () => {
+      // The URL came from another player via the server — only ever navigate
+      // to http(s), never javascript:/data: etc. Cross-origin stays allowed
+      // on purpose: over Hamachi the host's link carries their IP while the
+      // guest may have opened the game via localhost.
+      let target: URL;
+      try {
+        target = new URL(invite.inviteUrl, window.location.href);
+      } catch {
+        return;
+      }
+      if (target.protocol !== "https:" && target.protocol !== "http:") return;
       playConfirm();
       // Joining reuses the invite-link flow: full load with ?room= in the URL.
-      window.location.href = invite.inviteUrl;
+      window.location.href = target.href;
     });
     const decline = document.createElement("button");
     decline.className = "friends-button subtle";
