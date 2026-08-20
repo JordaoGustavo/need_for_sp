@@ -91,7 +91,13 @@ export class RaceSession {
 
   private remoteHelloReceived = false;
   private remoteCarId: string | null = null;
+  /** Race start in the HOST's wall clock; guests convert via clockOffsetMs. */
   private startAtEpochMs: number | null = null;
+  /** Guest's estimate of (host clock − local clock); 0 on the host and solo. */
+  private clockOffsetMs = 0;
+  private bestClockPingRttMs = Number.POSITIVE_INFINITY;
+  private clockPingsSent = 0;
+  private lastClockPingAtMs = 0;
   private raceTimeSeconds = 0;
   private timeSinceLastSendSeconds = 0;
 
@@ -135,13 +141,36 @@ export class RaceSession {
     this.send({ type: "hello", carId: this.config.localCar.id });
     if (this.config.isHost) {
       this.maybeStartCountdownAsHost();
+    } else {
+      this.sendClockPing();
     }
+  }
+
+  /**
+   * NTP-style clock sync: the guest pings a few times, the host echoes its
+   * clock, and the lowest-RTT sample wins. hostNow() then lets the guest
+   * compare startAtEpochMs (host clock) fairly, so both cars launch together
+   * even when the machines' wall clocks disagree.
+   */
+  private sendClockPing(): void {
+    this.clockPingsSent++;
+    this.lastClockPingAtMs = this.now();
+    this.send({ type: "clockPing", sentAtMs: this.lastClockPingAtMs });
+  }
+
+  private hostNow(): number {
+    return this.now() + this.clockOffsetMs;
   }
 
   /** Advances local simulation by dtSeconds using the given input. Call once per frame. */
   update(dtSeconds: number, input: CarInput): RaceSessionSnapshot {
+    // Guests refine the clock offset with a few extra pings (best of 5).
+    if (this.config.peer && !this.config.isHost && this.clockPingsSent > 0 && this.clockPingsSent < 5 && this.now() - this.lastClockPingAtMs > 250) {
+      this.sendClockPing();
+    }
+
     const countdownRemaining = this.countdownSecondsRemaining();
-    const racing = this.startAtEpochMs !== null && this.now() >= this.startAtEpochMs;
+    const racing = this.startAtEpochMs !== null && this.hostNow() >= this.startAtEpochMs;
 
     if (racing && !this.finished) {
       this.raceTimeSeconds += dtSeconds;
@@ -377,7 +406,7 @@ export class RaceSession {
 
   private countdownSecondsRemaining(): number | null {
     if (this.startAtEpochMs === null) return null;
-    const remaining = (this.startAtEpochMs - this.now()) / 1000;
+    const remaining = (this.startAtEpochMs - this.hostNow()) / 1000;
     // Null once the "GO!" flash has run its course, so the HUD stops drawing it.
     if (remaining <= -GO_DISPLAY_SECONDS) return null;
     return Math.max(0, remaining);
@@ -417,6 +446,18 @@ export class RaceSession {
       case "raceStart":
         this.startAtEpochMs = message.startAtEpochMs;
         return;
+      case "clockPing":
+        this.send({ type: "clockPong", pingSentAtMs: message.sentAtMs, hostNowMs: this.now() });
+        return;
+      case "clockPong": {
+        const nowMs = this.now();
+        const rttMs = nowMs - message.pingSentAtMs;
+        if (rttMs >= 0 && rttMs < this.bestClockPingRttMs) {
+          this.bestClockPingRttMs = rttMs;
+          this.clockOffsetMs = message.hostNowMs + rttMs / 2 - nowMs;
+        }
+        return;
+      }
       case "carState":
         this.previousRemoteSnapshot = this.latestRemoteSnapshot;
         this.latestRemoteSnapshot = { state: message.state, receivedAtMs: this.now() };
