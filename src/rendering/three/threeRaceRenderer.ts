@@ -43,6 +43,10 @@ export class ThreeRaceRenderer implements RaceRenderer {
   private lastPointerY = 0;
   private readonly onPointerDown = (event: PointerEvent): void => {
     if (event.button !== 0) return;
+    // Only canvas drags orbit the camera — pointer capture here would steal
+    // the pointerup from overlaid UI (e.g. the "Voltar ao menu" button),
+    // swallowing its click.
+    if (!(event.target instanceof HTMLCanvasElement)) return;
     this.orbitDragging = true;
     this.lastPointerX = event.clientX;
     this.lastPointerY = event.clientY;
