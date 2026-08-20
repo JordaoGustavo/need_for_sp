@@ -72,9 +72,20 @@ function broadcastPresenceChange(nick: string): void {
   }
 }
 
+/**
+ * Hostname each client used to reach this server (from the WS upgrade Host
+ * header). The game page (vite) runs on the same machine as this server, so
+ * this is an address that client can provably reach — used to fix up invite
+ * URLs, which are otherwise built from the INVITER's address bar (often
+ * "localhost", useless on the friend's machine).
+ */
+const clientHostnames = new WeakMap<WebSocket, string>();
+
 const wss = new WebSocketServer({ port: PORT });
 
-wss.on("connection", (socket) => {
+wss.on("connection", (socket, request) => {
+  const clientHostname = hostnameFromHostHeader(request.headers.host);
+  if (clientHostname) clientHostnames.set(socket, clientHostname);
   let joinedRoom: string | null = null;
   let joinedRole: PeerRole | null = null;
   let lobbyNick: string | null = null;
@@ -173,7 +184,7 @@ wss.on("connection", (socket) => {
       send(friendSocket, {
         type: "room-invite",
         from: lobbyNick,
-        inviteUrl: message.inviteUrl,
+        inviteUrl: rewriteInviteHost(message.inviteUrl, clientHostnames.get(friendSocket)),
         roomCode: message.roomCode,
       });
       return;
@@ -202,6 +213,27 @@ wss.on("connection", (socket) => {
 
 function isValidRole(value: unknown): value is PeerRole {
   return value === "host" || value === "guest";
+}
+
+function hostnameFromHostHeader(host: string | undefined): string | null {
+  if (!host) return null;
+  try {
+    return new URL(`http://${host}`).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/** Points the invite URL at a hostname the recipient is known to reach (keeps port/params). */
+function rewriteInviteHost(inviteUrl: string, recipientHostname: string | undefined): string {
+  if (!recipientHostname) return inviteUrl;
+  try {
+    const url = new URL(inviteUrl);
+    url.hostname = recipientHostname;
+    return url.toString();
+  } catch {
+    return inviteUrl;
+  }
 }
 
 /** Invite URLs are navigated to on the recipient's browser — http(s) only. */

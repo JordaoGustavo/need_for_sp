@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LobbyStore } from "../../server/lobbyStore";
 
@@ -40,5 +43,28 @@ describe("lobby nickname registry", () => {
     // Adding again doesn't duplicate.
     store.addFriend("Alice", "Bob");
     expect(store.friendsOf("Alice")).toEqual(["Bob"]);
+  });
+
+  it("rejects volatile tokens, so a broken client can never burn a nick", () => {
+    const store = new LobbyStore(null);
+    expect(store.login("Jordao", "volatile-abc123xyz").ok).toBe(false);
+  });
+
+  it("releases nicks burned with volatile tokens when loading the store file", () => {
+    const file = join(mkdtempSync(join(tmpdir(), "lobby-")), "lobbyStore.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        users: {
+          alice: { nick: "Alice", token: "volatile-oldbug", friends: [] },
+          bob: { nick: "Bob", token: "real-token-1234", friends: [] },
+        },
+      }),
+    );
+    const store = new LobbyStore(file);
+    // Alice's burned nick is free again; Bob's real registration survives.
+    expect(store.login("Alice", "fresh-token-5678")).toEqual({ ok: true, nick: "Alice" });
+    expect(store.login("Bob", "another-token").ok).toBe(false);
+    expect(store.login("Bob", "real-token-1234")).toEqual({ ok: true, nick: "Bob" });
   });
 });

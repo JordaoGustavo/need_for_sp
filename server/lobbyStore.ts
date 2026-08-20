@@ -41,6 +41,10 @@ export class LobbyStore {
         users?: Record<string, UserRecord>;
       };
       for (const [key, record] of Object.entries(parsed.users ?? {})) {
+        // "volatile-" tokens came from an old client bug (crypto.randomUUID
+        // missing on insecure origins): the client can never present that
+        // token again, so the nick is burned — release it on load.
+        if (record.token.startsWith("volatile-")) continue;
         this.users.set(key, record);
       }
     } catch {
@@ -53,7 +57,7 @@ export class LobbyStore {
     if (!isValidNick(nick)) {
       return { ok: false, message: "Nick inválido: use 3–16 letras, números ou _" };
     }
-    if (typeof token !== "string" || token.length < 8) {
+    if (typeof token !== "string" || token.length < 8 || token.startsWith("volatile-")) {
       return { ok: false, message: "Token inválido" };
     }
     const key = canonicalNick(nick);

@@ -24,14 +24,41 @@ export function saveNick(nick: string): void {
   }
 }
 
+let cachedToken: string | null = null;
+
 export function getIdentityToken(): string {
+  if (cachedToken) return cachedToken;
   try {
     const existing = localStorage.getItem(TOKEN_KEY);
-    if (existing) return existing;
-    const token = crypto.randomUUID();
-    localStorage.setItem(TOKEN_KEY, token);
-    return token;
+    if (existing) {
+      cachedToken = existing;
+      return existing;
+    }
   } catch {
-    return "volatile-" + Math.random().toString(36).slice(2);
+    // Storage unavailable (private mode) — fall through to a fresh token.
   }
+  const token = generateToken();
+  cachedToken = token;
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // Not persisted, but the in-memory cache keeps it stable for this page.
+  }
+  return token;
+}
+
+/**
+ * crypto.randomUUID is secure-context-only, so it does not exist when a friend
+ * opens the game via http://<ip>:5173 (the normal multiplayer setup) — that
+ * used to burn the nick with a throwaway token on every reload.
+ * crypto.getRandomValues works on insecure origins too.
+ */
+function generateToken(): string {
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }

@@ -62,9 +62,8 @@ class LobbyClient {
     return () => this.noticeListeners.delete(listener);
   }
 
-  /** Claims (or logs back into) a nickname. */
+  /** Claims (or logs back into) a nickname. Persisted only after lobby-ok. */
   setNick(nick: string): void {
-    saveNick(nick);
     this.connect(nick);
   }
 
@@ -106,6 +105,9 @@ class LobbyClient {
   private handleMessage(nick: string, message: ServerToClientMessage): void {
     switch (message.type) {
       case "lobby-ok":
+        // Only a confirmed nick is saved — a rejected one must not be retried
+        // on every page load.
+        saveNick(message.nick);
         this.setState({ kind: "online", nick: message.nick, friends: message.friends });
         return;
       case "friends":

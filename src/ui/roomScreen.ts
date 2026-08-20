@@ -8,6 +8,12 @@ import type { TrackDefinition } from "../domain/track";
 import type { TimeOfDay } from "../rendering/renderer";
 import type { YoutuberProfile } from "../domain/youtuber";
 
+const JOIN_TIMEOUT_MS = 15_000;
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
 export interface RoomScreenResult {
   readonly peer: PeerConnection;
   readonly isHost: boolean;
@@ -63,7 +69,15 @@ export function renderRoomScreen(
 
   if (roomCodeFromUrl) {
     status.textContent = `Entrando na sala ${roomCodeFromUrl}...`;
-    joinRoom(signalingUrl, roomCodeFromUrl)
+    // A dead room code (host gone, wrong server) produces no server error at
+    // all — without a timeout the guest hangs on "Entrando..." forever.
+    const timeout = new Promise<never>((_, reject) => {
+      window.setTimeout(
+        () => reject(new Error("o anfitrião não respondeu — confira o link e a conexão")),
+        JOIN_TIMEOUT_MS,
+      );
+    });
+    Promise.race([joinRoom(signalingUrl, roomCodeFromUrl), timeout])
       .then((peer) => onReady({ peer, isHost: false, roomCode: roomCodeFromUrl }))
       .catch((err) => {
         status.textContent = `Falha ao entrar na sala: ${(err as Error).message}`;
@@ -79,6 +93,16 @@ export function renderRoomScreen(
     linkInput.value = inviteUrl;
     linkBox.classList.remove("hidden");
     status.textContent = `Sala ${roomCode} criada. Compartilhe o link e aguarde o outro jogador...`;
+    if (isLoopbackHost(window.location.hostname)) {
+      // Friend invites get their URL fixed up by the server, but this copyable
+      // link goes out verbatim — a localhost link is useless on another machine.
+      const warn = document.createElement("p");
+      warn.className = "room-status";
+      warn.textContent =
+        "Atenção: você abriu o jogo via localhost — este link só funciona nesta máquina. " +
+        "Para convidar alguém de outra máquina pelo link, abra o jogo pelo seu IP (ex.: http://SEU-IP:5173).";
+      root.appendChild(warn);
+    }
     root.appendChild(buildFriendInvitePanel(inviteUrl, roomCode, root));
 
     peerConnectionPromise

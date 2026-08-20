@@ -902,7 +902,9 @@ body {
   margin-bottom: 10px;
 }
 
-/* During a race the panel would sit on top of the HUD — hide it. */
-body.in-race .friends-widget {
+/* During a race the panel would sit on top of the HUD — hide it. Invite
+   toasts too: clicking one navigates away mid-race. */
+body.in-race .friends-widget,
+body.in-race .invite-toast-host {
   display: none;
 }
