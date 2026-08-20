@@ -30,9 +30,10 @@ export class KeyboardInputController {
     if (left) steer -= 1;
     if (right) steer += 1;
 
-    const nitro = this.pressed.has("shift") || this.pressed.has(" ");
+    const nitro = this.pressed.has("shift"); // Shift ONLY
+    const handbrake = this.pressed.has(" "); // Space = freio de mão
 
-    return { throttle, brake, steer, nitro };
+    return { throttle, brake, steer, nitro, handbrake };
   }
 
   dispose(): void {

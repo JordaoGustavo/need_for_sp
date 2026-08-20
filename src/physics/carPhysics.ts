@@ -15,6 +15,26 @@ const REVERSE_TOP_SPEED_KMH = 30;
  */
 export const SLOPE_ACCEL_KMH_PER_SEC = 35;
 
+// --- Grip / drift model ------------------------------------------------------
+// The velocity direction chases the nose (heading) at a grip rate. Huge at low
+// speed (normal driving is indistinguishable from a fully-gripped model),
+// shrinking with speed, collapsing under handbrake — that gap IS the drift.
+
+/** Velocity-direction chase rate toward heading at standstill, 1/s. */
+export const GRIP_RATE_MAX_PER_SEC = 22;
+/** Speed (m/s) where grip has fallen to half via 1/(1+(v/v0)²) — ~108 km/h. */
+const GRIP_FALLOFF_SPEED_MS = 30;
+/** Handbrake: rear grip collapses to this fraction. */
+const HANDBRAKE_GRIP_FACTOR = 0.2;
+/** Handbrake + steer: extra yaw so the tail steps out on demand. */
+const HANDBRAKE_YAW_BOOST = 1.6;
+/** Drift angle cap (~34°) — past this the model "catches" the car; no spins. */
+export const MAX_DRIFT_ANGLE_RAD = 0.6;
+/** Speed scrubbed by sliding at the full drift cap, km/h/s (linear in drift). */
+const DRIFT_SCRUB_KMH_PER_SEC = 30;
+/** Handbrake decel as a fraction of the braking stat (weaker than the pedal). */
+const HANDBRAKE_DECEL_FACTOR = 0.45;
+
 /**
  * Past the finish line the runoff area ends in a barrier at this distance.
  * Sized so the post-finish auto-brake stops every car with margin to spare
@@ -43,6 +63,10 @@ const TRACK_START_BACKSTOP_METERS = -8;
  *
  * `pathSlope` is the road's grade at the car (dY/dDistance, positive uphill):
  * climbs bleed speed and descents feed it, on top of the engine/brake forces.
+ *
+ * Grip: the direction of travel (velocityAngleRad) chases the nose (heading)
+ * at a rate that shrinks with speed and collapses under handbrake — push past
+ * the tires and the car slides while pointing into the corner (drift).
  */
 export function stepCarPhysics(
   state: CarRuntimeState,
@@ -52,23 +76,47 @@ export function stepCarPhysics(
   pathCurvatureRadPerMeter = 0,
   pathSlope = 0,
 ): CarRuntimeState {
-  const nextSpeedKmh = computeNextSpeed(state.speedKmh, stats, input, dtSeconds, pathSlope);
+  const driftPrevRad = normalizeAngleRad(state.headingRad - state.velocityAngleRad);
+  const nextSpeedKmh = computeNextSpeed(
+    state.speedKmh,
+    stats,
+    input,
+    dtSeconds,
+    pathSlope,
+    Math.abs(driftPrevRad),
+  );
 
   const speedMs = nextSpeedKmh * KMH_TO_MS;
   const speedAbsMs = Math.abs(speedMs);
   // No yaw when parked, full agility by ~30 km/h, progressively calmer beyond.
   const steerAuthority = Math.min(1, speedAbsMs / 8) / (1 + speedAbsMs / 45);
   const reverseFactor = nextSpeedKmh < 0 ? -1 : 1;
+  const yawBoost = input.handbrake && nextSpeedKmh > 0 ? HANDBRAKE_YAW_BOOST : 1;
   const steeredHeadingRad =
-    state.headingRad + input.steer * stats.turnRateRadPerSec * steerAuthority * reverseFactor * dtSeconds;
+    state.headingRad +
+    input.steer * stats.turnRateRadPerSec * steerAuthority * yawBoost * reverseFactor * dtSeconds;
 
+  // Grip: exponential blend (frame-rate independent) of the velocity direction
+  // toward the nose. Whatever gap survives the blend is the drift angle.
+  const gripRatePerSec =
+    (GRIP_RATE_MAX_PER_SEC / (1 + (speedAbsMs / GRIP_FALLOFF_SPEED_MS) ** 2)) *
+    (input.handbrake ? HANDBRAKE_GRIP_FACTOR : 1);
+  let driftRad =
+    normalizeAngleRad(steeredHeadingRad - state.velocityAngleRad) *
+    Math.exp(-gripRatePerSec * dtSeconds);
+  driftRad = clamp(driftRad, -MAX_DRIFT_ANGLE_RAD, MAX_DRIFT_ANGLE_RAD);
+  // Reverse/parked: no drift model — velocity locks to heading (sane reversing).
+  let velocityAngleRad = nextSpeedKmh < 0 ? steeredHeadingRad : steeredHeadingRad - driftRad;
+
+  // The car travels where its VELOCITY points, not where the nose does.
   const avgSpeedMs = ((state.speedKmh + nextSpeedKmh) / 2) * KMH_TO_MS;
-  const forwardDeltaMeters = Math.cos(steeredHeadingRad) * avgSpeedMs * dtSeconds;
-  // The road turned under the car; un-turn the relative heading by the same amount.
+  const forwardDeltaMeters = Math.cos(velocityAngleRad) * avgSpeedMs * dtSeconds;
+  // The road turned under the car; un-turn BOTH path-frame angles by the same amount.
   const headingRad = steeredHeadingRad - pathCurvatureRadPerMeter * forwardDeltaMeters;
+  velocityAngleRad -= pathCurvatureRadPerMeter * forwardDeltaMeters;
 
   const distanceMeters = state.distanceMeters + forwardDeltaMeters;
-  const lateralOffsetMeters = state.lateralOffsetMeters + Math.sin(headingRad) * avgSpeedMs * dtSeconds;
+  const lateralOffsetMeters = state.lateralOffsetMeters + Math.sin(velocityAngleRad) * avgSpeedMs * dtSeconds;
 
   return {
     carId: state.carId,
@@ -76,7 +124,15 @@ export function stepCarPhysics(
     lateralOffsetMeters,
     speedKmh: nextSpeedKmh,
     headingRad,
+    velocityAngleRad,
   };
+}
+
+function normalizeAngleRad(angle: number): number {
+  let a = angle % (Math.PI * 2);
+  if (a > Math.PI) a -= Math.PI * 2;
+  if (a < -Math.PI) a += Math.PI * 2;
+  return a;
 }
 
 /** Kerb width beyond the asphalt that can be used penalty-free, in meters. */
@@ -203,10 +259,19 @@ function computeNextSpeed(
   input: CarInput,
   dtSeconds: number,
   pathSlope: number,
+  driftAbsRad: number,
 ): number {
   let speed = currentSpeedKmh;
 
-  if (input.throttle) {
+  if (input.handbrake) {
+    // Locked rears: no drive gets through, firm pull toward 0 (weaker than the
+    // pedal, works from reverse too, holds at 0 — no reverse engagement).
+    const handbrakeDecel = stats.brakingKmhPerSec * HANDBRAKE_DECEL_FACTOR;
+    speed =
+      speed > 0
+        ? Math.max(0, speed - handbrakeDecel * dtSeconds)
+        : Math.min(0, speed + handbrakeDecel * dtSeconds);
+  } else if (input.throttle) {
     const forwardFraction = clamp(Math.max(0, speed) / stats.topSpeedKmh, 0, 1);
     const powerTaper = 1 - forwardFraction * forwardFraction;
     speed += stats.accelerationKmhPerSec * powerTaper * dtSeconds;
@@ -224,10 +289,18 @@ function computeNextSpeed(
     speed = Math.abs(speed) <= coastDrag ? 0 : speed - Math.sign(speed) * coastDrag;
   }
 
+  // Sliding scrubs speed: tires shed energy sideways, linear in drift angle.
+  if (speed > 0) {
+    speed = Math.max(0, speed - DRIFT_SCRUB_KMH_PER_SEC * (driftAbsRad / MAX_DRIFT_ANGLE_RAD) * dtSeconds);
+  }
+
   // Gravity along the road: acts on the signed speed, so it also pushes a
   // stationary car backward down a steep grade. (The coast branch's snap-to-
-  // zero doubles as a weak parking brake on gentle slopes.)
-  speed -= SLOPE_ACCEL_KMH_PER_SEC * pathSlope * dtSeconds;
+  // zero doubles as a weak parking brake on gentle slopes; the handbrake is a
+  // real parking brake — a handbraked, stopped car holds on any grade.)
+  if (!(input.handbrake && speed === 0)) {
+    speed -= SLOPE_ACCEL_KMH_PER_SEC * pathSlope * dtSeconds;
+  }
 
   // Downhill helps you REACH top speed, never exceed it.
   return clamp(speed, -REVERSE_TOP_SPEED_KMH, stats.topSpeedKmh);

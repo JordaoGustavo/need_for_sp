@@ -384,6 +384,7 @@ export class RaceSession {
       lateralOffsetMeters: lerp(previous.state.lateralOffsetMeters, latest.state.lateralOffsetMeters, factor),
       speedKmh: lerp(previous.state.speedKmh, latest.state.speedKmh, factor),
       headingRad: lerp(previous.state.headingRad, latest.state.headingRad, factor),
+      velocityAngleRad: lerp(previous.state.velocityAngleRad, latest.state.velocityAngleRad, factor),
     };
   }
 
@@ -469,11 +470,17 @@ export class RaceSession {
         }
         return;
       }
-      case "carState":
+      case "carState": {
+        // Defensive: a stale peer build without the drift field must not NaN us.
+        const state = {
+          ...message.state,
+          velocityAngleRad: message.state.velocityAngleRad ?? message.state.headingRad,
+        };
         this.previousRemoteSnapshot = this.latestRemoteSnapshot;
-        this.latestRemoteSnapshot = { state: message.state, receivedAtMs: this.now() };
-        this.remoteState = message.state;
+        this.latestRemoteSnapshot = { state, receivedAtMs: this.now() };
+        this.remoteState = state;
         return;
+      }
       case "raceFinished":
         this.finished = true;
         this.winnerId = message.winnerId;

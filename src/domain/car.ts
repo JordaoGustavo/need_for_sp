@@ -115,8 +115,10 @@ export interface CarInput {
   readonly brake: boolean;
   /** -1 (left) .. 1 (right). Unused on drag tracks, meaningful on circuit tracks. */
   readonly steer: number;
-  /** NOS button held (Shift/Space). Boost logic lives in RaceSession. */
+  /** NOS button held (Shift). Boost logic lives in RaceSession. */
   readonly nitro?: boolean;
+  /** Handbrake held (Space): locks the rears — moderate decel, grip loss, drift. */
+  readonly handbrake?: boolean;
 }
 
 export const NEUTRAL_INPUT: CarInput = {
@@ -136,6 +138,11 @@ export interface CarRuntimeState {
   speedKmh: number;
   /** Heading in radians, used for rendering only in the MVP (top-down sprite rotation). */
   headingRad: number;
+  /**
+   * Direction of travel in the path frame, radians. Lags headingRad when the
+   * tires lose grip — drift angle = headingRad - velocityAngleRad.
+   */
+  velocityAngleRad: number;
 }
 
 export function createInitialCarRuntimeState(carId: string): CarRuntimeState {
@@ -145,5 +152,6 @@ export function createInitialCarRuntimeState(carId: string): CarRuntimeState {
     lateralOffsetMeters: 0,
     speedKmh: 0,
     headingRad: 0,
+    velocityAngleRad: 0,
   };
 }

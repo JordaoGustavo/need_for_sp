@@ -160,7 +160,8 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
 
 /**
  * Tire squeal fires on launch wheelspin (full throttle at low speed once the
- * race is running) and under hard braking from speed.
+ * race is running), under hard braking from speed, on handbrake lockup, and —
+ * loudest of all — while the car is actually sliding (drift angle).
  */
 function computeSquealIntensity(
   snapshot: ReturnType<RaceSession["update"]>,
@@ -169,13 +170,20 @@ function computeSquealIntensity(
   if (snapshot.finished || snapshot.raceTimeSeconds <= 0) return 0;
   const speed = snapshot.localState.speedKmh;
 
+  let intensity = 0;
   if (carInput.throttle && speed < LAUNCH_WHEELSPIN_MAX_KMH) {
-    return 0.5 + 0.5 * (1 - speed / LAUNCH_WHEELSPIN_MAX_KMH);
+    intensity = 0.5 + 0.5 * (1 - speed / LAUNCH_WHEELSPIN_MAX_KMH);
   }
   if (carInput.brake && speed > 40) {
-    return 0.6;
+    intensity = Math.max(intensity, 0.6);
   }
-  return 0;
+  if (carInput.handbrake && speed > 25) {
+    intensity = Math.max(intensity, 0.55);
+  }
+  const driftRad = Math.abs(
+    normalizeAngleRad(snapshot.localState.headingRad - snapshot.localState.velocityAngleRad),
+  );
+  return Math.max(intensity, Math.min(1, driftRad / 0.25));
 }
 
 /**
