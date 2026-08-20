@@ -37,7 +37,11 @@ export function stopMenuMusic(fadeSeconds = 0.8): void {
 
 async function begin(): Promise<void> {
   try {
-    const music = (await tryStartFileTrack()) ?? startStormAmbience();
+    const fileTrack = await tryStartFileTrack();
+    if (!fileTrack) {
+      console.info(`[menuMusic] ${MENU_MUSIC_URL} indisponível — usando ambiência de chuva`);
+    }
+    const music = fileTrack ?? startStormAmbience();
     if (stopped) {
       music.stop(0);
       return;
