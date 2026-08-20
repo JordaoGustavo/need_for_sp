@@ -10,6 +10,12 @@ const WALL_SCRUB_KMH_PER_SEC = 90;
 const REVERSE_TOP_SPEED_KMH = 30;
 
 /**
+ * Gravity along the road, in km/h per second per unit of slope (dY/dDistance).
+ * Physical value: g · 3.6 ≈ 35 — a 10% grade drains/adds ~3.5 km/h each second.
+ */
+export const SLOPE_ACCEL_KMH_PER_SEC = 35;
+
+/**
  * Past the finish line the runoff area ends in a barrier at this distance.
  * Sized so the post-finish auto-brake stops every car with margin to spare
  * (worst case: Supra from 245 km/h needs ~82m at 2.2× its braking stat).
@@ -34,6 +40,9 @@ const TRACK_START_BACKSTOP_METERS = -8;
  * road itself bends — subtracting the curvature's yaw keeps the car's WORLD
  * heading constant unless the driver steers. The driver chooses the line
  * through every corner; nobody gets pulled around a curve for free.
+ *
+ * `pathSlope` is the road's grade at the car (dY/dDistance, positive uphill):
+ * climbs bleed speed and descents feed it, on top of the engine/brake forces.
  */
 export function stepCarPhysics(
   state: CarRuntimeState,
@@ -41,8 +50,9 @@ export function stepCarPhysics(
   input: CarInput,
   dtSeconds: number,
   pathCurvatureRadPerMeter = 0,
+  pathSlope = 0,
 ): CarRuntimeState {
-  const nextSpeedKmh = computeNextSpeed(state.speedKmh, stats, input, dtSeconds);
+  const nextSpeedKmh = computeNextSpeed(state.speedKmh, stats, input, dtSeconds, pathSlope);
 
   const speedMs = nextSpeedKmh * KMH_TO_MS;
   const speedAbsMs = Math.abs(speedMs);
@@ -192,6 +202,7 @@ function computeNextSpeed(
   stats: CarStats,
   input: CarInput,
   dtSeconds: number,
+  pathSlope: number,
 ): number {
   let speed = currentSpeedKmh;
 
@@ -213,6 +224,12 @@ function computeNextSpeed(
     speed = Math.abs(speed) <= coastDrag ? 0 : speed - Math.sign(speed) * coastDrag;
   }
 
+  // Gravity along the road: acts on the signed speed, so it also pushes a
+  // stationary car backward down a steep grade. (The coast branch's snap-to-
+  // zero doubles as a weak parking brake on gentle slopes.)
+  speed -= SLOPE_ACCEL_KMH_PER_SEC * pathSlope * dtSeconds;
+
+  // Downhill helps you REACH top speed, never exceed it.
   return clamp(speed, -REVERSE_TOP_SPEED_KMH, stats.topSpeedKmh);
 }
 

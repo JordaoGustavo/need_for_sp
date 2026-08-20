@@ -9,6 +9,9 @@ import { createTrackPathModel, type TrackPathModel, type TrackSample } from "./t
 
 const HUD_HEIGHT_FRACTION = 0.3;
 
+/** How far the floresta terrain skirt (embankment) reaches from the centerline. */
+const SKIRT_REACH_METERS = 38;
+
 /**
  * WebGL implementation of RaceRenderer (supersedes the 2D CanvasRaceRenderer —
  * see ADR 0009). Night-time street scene with a chase camera behind the local
@@ -185,7 +188,9 @@ export class ThreeRaceRenderer implements RaceRenderer {
     const half = track.widthMeters / 2;
     // Race tracks use white boundary lines; highways keep yellow/orange.
     const [leftLine, rightLine] =
-      track.scenery === "autodromo" ? [0xf2f3f5, 0xf2f3f5] : [0xf2d200, 0xff5a1f];
+      track.scenery === "autodromo" || track.scenery === "floresta"
+        ? [0xf2f3f5, 0xf2f3f5]
+        : [0xf2d200, 0xff5a1f];
     this.addRibbon(samples, -(half - 0.25), 0.3, new THREE.MeshBasicMaterial({ color: leftLine }), 0.012);
     this.addRibbon(samples, half - 0.25, 0.3, new THREE.MeshBasicMaterial({ color: rightLine }), 0.012);
     this.addCenterDashes(track, from + 8, to - 8);
@@ -219,13 +224,18 @@ export class ThreeRaceRenderer implements RaceRenderer {
       }
     }
 
-    // Race tracks have floodlight towers, not street poles.
-    if (track.scenery !== "autodromo") {
+    // Race tracks have floodlight towers, not street poles; the Nordschleife
+    // famously has neither.
+    if (track.scenery !== "autodromo" && track.scenery !== "floresta") {
       this.addStreetLights(track, from, to);
     }
     this.addScenery(track, samples);
     this.addTunnels(track);
-    this.addViaductSupports(track, samples);
+    // Floresta owns its elevation via a terrain skirt (addFloresta) — pillars
+    // under an entire hillside track would look like a 5 km viaduct.
+    if (track.scenery !== "floresta") {
+      this.addViaductSupports(track, samples);
+    }
   }
 
   /**
@@ -268,6 +278,10 @@ export class ThreeRaceRenderer implements RaceRenderer {
       case "autodromo":
         [sky, near, far] = day ? [0x9fc4e8, 220, 1200] : [0x05070f, 70, 380];
         break;
+      case "floresta":
+        // Eifel mist hanging over the Green Hell.
+        [sky, near, far] = day ? [0xa9c8b8, 110, 560] : [0x050d08, 45, 250];
+        break;
       default:
         [sky, near, far] = day ? [0x9fc0e0, 150, 900] : [0x05070f, 60, 320];
     }
@@ -296,9 +310,13 @@ export class ThreeRaceRenderer implements RaceRenderer {
             ? day
               ? 0x3f7a2e // Interlagos daytime grass
               : 0x101f0a
-            : day
-              ? 0x3c4046
-              : 0x0a0d13;
+            : track.scenery === "floresta"
+              ? day
+                ? 0x2a5222 // Eifel forest floor
+                : 0x071008
+              : day
+                ? 0x3c4046
+                : 0x0a0d13;
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(maxX - minX + margin * 2, maxZ - minZ + margin * 2),
       new THREE.MeshStandardMaterial({ color, roughness: 1 }),
@@ -553,7 +571,142 @@ export class ThreeRaceRenderer implements RaceRenderer {
       case "autodromo":
         this.addAutodromo(track, samples, random);
         return;
+      case "floresta":
+        this.addFloresta(track, samples, random);
+        return;
     }
+  }
+
+  /**
+   * Nordschleife-style dressing: the road rides its real elevation profile, so
+   * a terrain skirt (embankment) sweeps from the ground plane up to the
+   * shoulder on both sides — no floating ribbon, no viaduct pillars. Armco
+   * barriers hug the runoff edge (the physical wall the lateral clamp already
+   * implies), kerbs mark the bends, and a dense instanced conifer forest
+   * stands ON the embankment at road height.
+   */
+  private addFloresta(
+    track: TrackDefinition,
+    samples: readonly TrackSample[],
+    random: () => number,
+  ): void {
+    const day = this.timeOfDay === "day";
+    const half = track.widthMeters / 2;
+    const runoff = track.runoffMeters ?? 0;
+    const shoulder = half + runoff + 1.5;
+    const skirtReach = SKIRT_REACH_METERS;
+
+    // Grass strip over the runoff (drivable: kerb free, grass drags).
+    const grass = new THREE.MeshStandardMaterial({
+      color: day ? 0x35692a : 0x0d1c0e,
+      roughness: 1,
+    });
+    this.addRibbon(samples, -(half + runoff / 2), runoff, grass, 0.006);
+    this.addRibbon(samples, half + runoff / 2, runoff, grass, 0.006);
+
+    // Terrain skirt: ground plane -> shoulder height, one mesh per side worth
+    // of the whole lap (swept profile, absolute heights).
+    const skirt = new THREE.MeshStandardMaterial({
+      color: day ? 0x2f5c26 : 0x081408,
+      roughness: 1,
+      side: THREE.DoubleSide,
+    });
+    this.sweepProfile(
+      samples,
+      (s) => [
+        [-skirtReach, 0],
+        [-shoulder, Math.max(0, s.y - 0.3)],
+        [shoulder, Math.max(0, s.y - 0.3)],
+        [skirtReach, 0],
+      ],
+      skirt,
+    );
+
+    // Kerbs on every bend, then armco right past the runoff.
+    this.addKerbs(track, samples);
+    const armco = new THREE.MeshStandardMaterial({
+      color: day ? 0x9aa2aa : 0x4a5058,
+      roughness: 0.45,
+      metalness: 0.55,
+      side: THREE.DoubleSide,
+    });
+    this.addWallRibbon(samples, -(half + runoff + 0.9), 0, 0.75, armco);
+    this.addWallRibbon(samples, half + runoff + 0.9, 0, 0.75, armco);
+
+    this.addForestInstanced(track, samples, random, Math.round(track.lengthMeters / 6));
+    this.addMorros(track, samples, random, 14);
+  }
+
+  /**
+   * Same conifer look as addTrees, but as 4 InstancedMeshes (1 trunk + 3
+   * foliage tones) — a 5 km forest would otherwise be ~1700 draw calls.
+   * Trees stand on the terrain skirt: base height interpolates from road
+   * shoulder down to the ground plane.
+   */
+  private addForestInstanced(
+    track: TrackDefinition,
+    samples: readonly TrackSample[],
+    random: () => number,
+    count: number,
+  ): void {
+    const trunkGeometry = new THREE.CylinderGeometry(0.18, 0.26, 2.2, 6);
+    const foliageGeometry = new THREE.ConeGeometry(1.9, 4.4, 7);
+    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x2b2015, roughness: 0.95 });
+    const foliageMaterials = [0x0d2d16, 0x123a1c, 0x0a2411].map(
+      (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.95 }),
+    );
+
+    const edge = track.widthMeters / 2 + (track.runoffMeters ?? 0) + 2;
+    const clearance = edge + 0.5;
+    interface Placement {
+      x: number;
+      y: number;
+      z: number;
+      scale: number;
+      tone: number;
+    }
+    const placements: Placement[] = [];
+    for (let i = 0; i < count; i++) {
+      const s = samples[Math.floor(random() * samples.length)]!;
+      const side = random() < 0.5 ? -1 : 1;
+      const offset = edge + random() * (SKIRT_REACH_METERS - 4 - edge);
+      const x = s.x + s.nx * side * offset;
+      const z = s.z + s.nz * side * offset;
+      // The lap folds back on itself — never plant a tree on ANY road section.
+      const clear = samples.every((o) => (o.x - x) ** 2 + (o.z - z) ** 2 > clearance ** 2);
+      if (!clear) continue;
+      // Down the embankment: shoulder height at the road, ground at the reach.
+      const t = (offset - edge) / (SKIRT_REACH_METERS - edge);
+      placements.push({
+        x,
+        y: Math.max(0, s.y * (1 - t)),
+        z,
+        scale: 0.8 + random() * 1.5,
+        tone: Math.floor(random() * foliageMaterials.length),
+      });
+    }
+
+    const dummy = new THREE.Object3D();
+    const trunks = new THREE.InstancedMesh(trunkGeometry, trunkMaterial, placements.length);
+    placements.forEach((p, i) => {
+      dummy.position.set(p.x, p.y + 1.1 * p.scale, p.z);
+      dummy.scale.setScalar(p.scale);
+      dummy.updateMatrix();
+      trunks.setMatrixAt(i, dummy.matrix);
+    });
+    this.scene.add(trunks);
+
+    foliageMaterials.forEach((material, tone) => {
+      const mine = placements.filter((p) => p.tone === tone);
+      const foliage = new THREE.InstancedMesh(foliageGeometry, material, mine.length);
+      mine.forEach((p, i) => {
+        dummy.position.set(p.x, p.y + 4.2 * p.scale, p.z);
+        dummy.scale.setScalar(p.scale);
+        dummy.updateMatrix();
+        foliage.setMatrixAt(i, dummy.matrix);
+      });
+      this.scene.add(foliage);
+    });
   }
 
   /**
@@ -1142,8 +1295,14 @@ export class ThreeRaceRenderer implements RaceRenderer {
     ctx.fillStyle = "rgba(10,13,18,0.6)";
     ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
 
-    // Fit the real track outline (any shape) into the circle.
-    const samples = this.pathModel!.sample(input.track.lengthMeters / 80, 0, input.track.lengthMeters);
+    // Fit the real track outline (any shape) into the circle. Circuits get a
+    // denser polyline — 80 samples turn the Nordschleife into mush.
+    const outlineSamples = this.pathModel!.closed ? 220 : 80;
+    const samples = this.pathModel!.sample(
+      input.track.lengthMeters / outlineSamples,
+      0,
+      input.track.lengthMeters,
+    );
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (const s of samples) {
       minX = Math.min(minX, s.x); maxX = Math.max(maxX, s.x);

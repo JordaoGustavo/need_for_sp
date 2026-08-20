@@ -1,5 +1,5 @@
 import { getCarById } from "../content/cars";
-import type { TrackDefinition } from "../domain/track";
+import { createTrackSlope, type TrackDefinition } from "../domain/track";
 import type { CarDefinition } from "../domain/car";
 import { deriveHudState } from "../game/hudDerivation";
 import { EngineSound, playEngineBlow } from "../audio/engineSound";
@@ -66,6 +66,7 @@ export function renderRaceScreen(config: RaceScreenConfig): HTMLElement {
     isHost: config.isHost,
     peer: config.peer,
     trackCurvature,
+    trackSlope: createTrackSlope(config.track),
   });
 
   function resize(): void {

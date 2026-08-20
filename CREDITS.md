@@ -1,3 +1,13 @@
+# Créditos de dados de pista
+
+O traçado e a elevação da pista **Nordschleife**
+(`src/content/tracks/nordschleifeData.ts`) derivam de dados do
+[OpenStreetMap](https://www.openstreetmap.org/) — © colaboradores do
+OpenStreetMap, licença [ODbL](https://opendatacommons.org/licenses/odbl/) —
+e do modelo digital de elevação EU-DEM (25 m) via
+[Open Topo Data](https://www.opentopodata.org/). Extração:
+`scripts/extractNordschleife.ts`.
+
 # Créditos de assets 3D
 
 Os modelos de carro em `public/models/` vêm de autores da comunidade, via

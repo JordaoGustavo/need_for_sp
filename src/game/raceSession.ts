@@ -46,6 +46,11 @@ export interface RaceSessionConfig {
    * has to steer through them. Omit for straight strips.
    */
   readonly trackCurvature?: (distanceMeters: number) => number;
+  /**
+   * Road grade (dY/dDistance, positive uphill) at a given distance — the
+   * physics' gravity term (see createTrackSlope). Omit for flat tracks.
+   */
+  readonly trackSlope?: (distanceMeters: number) => number;
   readonly now?: () => number;
 }
 
@@ -204,6 +209,7 @@ export class RaceSession {
         input,
         dtSeconds,
         this.curvatureAt(this.localState.distanceMeters),
+        this.slopeAt(this.localState.distanceMeters),
       );
       // Car-vs-car first: its lateral push may exceed the road, so the wall clamp runs last.
       if (this.config.peer) {
@@ -258,6 +264,7 @@ export class RaceSession {
         stillRolling ? { throttle: false, brake: true, steer: 0 } : NEUTRAL_INPUT,
         dtSeconds,
         this.curvatureAt(this.localState.distanceMeters),
+        this.slopeAt(this.localState.distanceMeters),
       );
       this.localState = applyTrackBoundaryCollision(
         this.localState,
@@ -398,6 +405,10 @@ export class RaceSession {
         finishTimeSeconds: this.raceTimeSeconds,
       });
     }
+  }
+
+  private slopeAt(distanceMeters: number): number {
+    return this.config.trackSlope?.(distanceMeters) ?? 0;
   }
 
   private curvatureAt(distanceMeters: number): number {

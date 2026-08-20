@@ -140,7 +140,9 @@ function drawTrackOutline(canvas: HTMLCanvasElement, track: TrackDefinition): vo
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  const samples = createTrackPathModel(track).sample(track.lengthMeters / 90, 0, track.lengthMeters);
+  const model = createTrackPathModel(track);
+  // Circuits get a denser polyline so long laps (Nordschleife) stay crisp.
+  const samples = model.sample(track.lengthMeters / (model.closed ? 220 : 90), 0, track.lengthMeters);
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const s of samples) {
     minX = Math.min(minX, s.x); maxX = Math.max(maxX, s.x);

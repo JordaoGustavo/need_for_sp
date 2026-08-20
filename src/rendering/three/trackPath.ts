@@ -84,7 +84,8 @@ function createCurveModel(track: TrackDefinition, closed: boolean): TrackPathMod
   for (let i = 0; i < sampleCount; i++) {
     relaxed.push(rawCurve.getPointAt(i / (closed ? sampleCount : sampleCount - 1)));
   }
-  for (let pass = 0; pass < 4; pass++) {
+  const smoothingPasses = track.pathSmoothingPasses ?? 4;
+  for (let pass = 0; pass < smoothingPasses; pass++) {
     relaxed = relaxed.map((p, i) => {
       if (!closed && (i === 0 || i === relaxed.length - 1)) return p;
       const prev = relaxed[(i - 1 + relaxed.length) % relaxed.length]!;
@@ -106,15 +107,18 @@ function createCurveModel(track: TrackDefinition, closed: boolean): TrackPathMod
   const elevationPoints = [...(track.elevation ?? [])].sort((a, b) => a.atMeters - b.atMeters);
   const elevationAt = (distanceMeters: number): number => {
     if (elevationPoints.length === 0) return 0;
+    // Closed loops wrap the elevation profile just like the XZ path — without
+    // this, lap 2+ would freeze at the last key point's height.
+    const d = closed ? ((distanceMeters % length) + length) % length : distanceMeters;
     const first = elevationPoints[0]!;
     const last = elevationPoints[elevationPoints.length - 1]!;
-    if (distanceMeters <= first.atMeters) return first.yMeters;
-    if (distanceMeters >= last.atMeters) return last.yMeters;
+    if (d <= first.atMeters) return first.yMeters;
+    if (d >= last.atMeters) return last.yMeters;
     for (let i = 0; i < elevationPoints.length - 1; i++) {
       const a = elevationPoints[i]!;
       const b = elevationPoints[i + 1]!;
-      if (distanceMeters >= a.atMeters && distanceMeters <= b.atMeters) {
-        const t = (distanceMeters - a.atMeters) / Math.max(1, b.atMeters - a.atMeters);
+      if (d >= a.atMeters && d <= b.atMeters) {
+        const t = (d - a.atMeters) / Math.max(1, b.atMeters - a.atMeters);
         const eased = t * t * (3 - 2 * t);
         return a.yMeters + (b.yMeters - a.yMeters) * eased;
       }

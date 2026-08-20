@@ -99,6 +99,41 @@ describe("stepCarPhysics", () => {
     expect(next.headingRad).toBe(0);
   });
 
+  it("uphill bleeds speed and downhill feeds it, relative to flat", () => {
+    const moving = { ...createInitialCarRuntimeState("car-1"), speedKmh: 100 };
+    const input = { throttle: true, brake: false, steer: 0 };
+    const flat = stepCarPhysics(moving, stats, input, 0.1).speedKmh;
+    const uphill = stepCarPhysics(moving, stats, input, 0.1, 0, 0.1).speedKmh;
+    const downhill = stepCarPhysics(moving, stats, input, 0.1, 0, -0.1).speedKmh;
+    expect(uphill).toBeLessThan(flat);
+    expect(downhill).toBeGreaterThan(flat);
+  });
+
+  it("coasting downhill decays slower than coasting on the flat", () => {
+    const moving = { ...createInitialCarRuntimeState("car-1"), speedKmh: 120 };
+    const coast = { throttle: false, brake: false, steer: 0 };
+    const flat = stepCarPhysics(moving, stats, coast, 1).speedKmh;
+    const downhill = stepCarPhysics(moving, stats, coast, 1, 0, -0.15).speedKmh;
+    expect(downhill).toBeGreaterThan(flat);
+  });
+
+  it("omitting the slope argument is byte-identical to the previous behavior", () => {
+    const moving = { ...createInitialCarRuntimeState("car-1"), speedKmh: 77, headingRad: 0.1 };
+    const input = { throttle: true, brake: false, steer: 0.3 };
+    const implicit = stepCarPhysics(moving, stats, input, 1 / 60, 0.01);
+    const explicitZero = stepCarPhysics(moving, stats, input, 1 / 60, 0.01, 0);
+    expect(implicit).toEqual(explicitZero);
+  });
+
+  it("a stationary car on a steep grade rolls backward (documented behavior)", () => {
+    let state = createInitialCarRuntimeState("car-1");
+    for (let i = 0; i < 180; i++) {
+      state = stepCarPhysics(state, stats, { throttle: false, brake: false, steer: 0 }, 1 / 60, 0, 0.15);
+    }
+    expect(state.speedKmh).toBeLessThan(0);
+    expect(state.distanceMeters).toBeLessThan(0);
+  });
+
   it("engages reverse when braking from a standstill, capped at walking pace", () => {
     let state = createInitialCarRuntimeState("car-1");
     for (let i = 0; i < 300; i++) {
